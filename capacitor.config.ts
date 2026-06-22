@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 
 // After deploying to Vercel, replace localhost:3000 with your Vercel URL
 // e.g. https://colorado-camping-finder.vercel.app
-const PRODUCTION_URL = process.env.CAPACITOR_SERVER_URL || 'http://localhost:3000'
+const PRODUCTION_URL = process.env.CAPACITOR_SERVER_URL || 'https://colorado-camping-finder.vercel.app'
 
 const config: CapacitorConfig = {
   appId: 'com.coloradocampfinder.app',
