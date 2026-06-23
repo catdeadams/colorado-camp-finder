@@ -1,13 +1,16 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import DispersedCard from './DispersedCard'
+import Icon from './Icon'
 import type { DispersedSpot, PublicLandFeature } from '@/lib/types'
 
 interface Props {
   searchLat: number | null
   searchLng: number | null
   searchRadius: number
+  searchKey?: number
+  vehicleType?: string
   onPolygonsLoaded: (polygons: PublicLandFeature[]) => void
   onSpotsLoaded?: (spots: DispersedSpot[]) => void
   selectedId: string | null
@@ -18,6 +21,8 @@ export default function DispersedPanel({
   searchLat,
   searchLng,
   searchRadius,
+  searchKey,
+  vehicleType = 'awd',
   onPolygonsLoaded,
   onSpotsLoaded,
   selectedId,
@@ -27,6 +32,17 @@ export default function DispersedPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const prevKeyRef = useRef<number | undefined>(searchKey)
+
+  // Reset when a new search runs
+  useEffect(() => {
+    if (searchKey !== prevKeyRef.current) {
+      prevKeyRef.current = searchKey
+      setLoaded(false)
+      setSpots([])
+      setError(null)
+    }
+  }, [searchKey])
 
   const load = useCallback(async () => {
     if (!searchLat || !searchLng) return
@@ -38,6 +54,7 @@ export default function DispersedPanel({
         lat: searchLat.toString(),
         lng: searchLng.toString(),
         radius: searchRadius.toString(),
+        vehicleType,
       })
       const res = await fetch(`/api/dispersed?${q}`)
       if (!res.ok) {
@@ -55,19 +72,21 @@ export default function DispersedPanel({
     } finally {
       setLoading(false)
     }
-  }, [searchLat, searchLng, searchRadius, onPolygonsLoaded])
+  }, [searchLat, searchLng, searchRadius, vehicleType, onPolygonsLoaded, onSpotsLoaded])
 
-  // Auto-load when we have a location
+  // Auto-load when we have a location and haven't loaded yet.
+  // Must also check !error — otherwise a failed load sets loaded=false,
+  // loading goes back to false, and this fires again in an infinite loop.
   useEffect(() => {
-    if (searchLat && searchLng && !loaded && !loading) {
+    if (searchLat && searchLng && !loaded && !loading && !error) {
       load()
     }
-  }, [searchLat, searchLng, loaded, loading, load])
+  }, [searchLat, searchLng, loaded, loading, load, error])
 
   if (!searchLat || !searchLng) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4">🌲</div>
+        <Icon name="trees" className="w-12 h-12 mb-4 text-stone-600" />
         <p className="text-stone-300 font-semibold">Dispersed camping suggestions</p>
         <p className="text-stone-500 text-sm mt-2 leading-relaxed">
           Run a campground search first to set your location, then switch to this tab for BLM and National Forest dispersed spots
@@ -79,7 +98,7 @@ export default function DispersedPanel({
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4 animate-pulse">🏕️</div>
+        <Icon name="tent" className="w-12 h-12 mb-4 text-stone-600 animate-pulse" />
         <p className="text-stone-300 font-semibold text-sm">Analyzing terrain...</p>
         <div className="mt-4 space-y-1.5 text-xs text-stone-500">
           <p>Querying BLM & Forest Service boundaries</p>
@@ -114,7 +133,7 @@ export default function DispersedPanel({
   if (loaded && spots.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4">🗺️</div>
+        <Icon name="map" className="w-12 h-12 mb-4 text-stone-600" />
         <p className="text-stone-300 font-semibold">No public land found nearby</p>
         <p className="text-stone-500 text-sm mt-2">
           This area may be mostly private land. Try expanding your search radius or moving to a different location.
@@ -130,7 +149,10 @@ export default function DispersedPanel({
     <div className="p-3 space-y-4">
       <div className="flex items-center justify-between px-1">
         <span className="text-xs text-stone-500">{spots.length} public land areas · BLM &amp; USFS</span>
-        <button onClick={load} className="text-[10px] text-stone-600 hover:text-stone-400">Refresh</button>
+        <button onClick={load} className="text-[10px] text-stone-600 hover:text-stone-400 flex items-center gap-1">
+          <Icon name="refresh" className="w-3 h-3" />
+          Refresh
+        </button>
       </div>
 
       {/* Disclaimer */}

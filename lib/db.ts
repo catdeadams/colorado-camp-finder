@@ -1,7 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 
-const DATA_DIR = path.join(process.cwd(), 'data')
+const DATA_DIR = process.env.VERCEL
+  ? '/tmp/camping-data'
+  : path.join(process.cwd(), 'data')
 const WATCHES_FILE = path.join(DATA_DIR, 'watches.json')
 
 export interface Watch {

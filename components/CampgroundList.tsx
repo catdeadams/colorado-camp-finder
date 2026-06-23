@@ -1,4 +1,5 @@
 import CampgroundCard from './CampgroundCard'
+import Icon from './Icon'
 import type { Campground } from '@/lib/types'
 
 interface Props {
@@ -72,7 +73,7 @@ export default function CampgroundList({
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4 animate-bounce">⛺</div>
+        <Icon name="tent" className="w-12 h-12 mb-4 text-stone-600 animate-bounce" />
         <p className="text-stone-300 font-semibold text-sm">Searching all sources...</p>
         <p className="text-stone-500 text-xs mt-1.5">rec.gov · CO State Parks · FreeCampsites.net</p>
         <p className="text-stone-600 text-xs mt-1">Checking availability — takes ~20 seconds</p>
@@ -103,7 +104,7 @@ export default function CampgroundList({
   if (!hasSearched) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-6xl mb-5">🏔️</div>
+        <Icon name="mountain" className="w-14 h-14 mb-5 text-stone-600" />
         <p className="text-stone-300 font-semibold">Ready to explore Colorado</p>
         <p className="text-stone-500 text-sm mt-2 leading-relaxed">
           Search by location and dates to find campgrounds from rec.gov, Colorado State Parks, and free camping sites
@@ -115,7 +116,7 @@ export default function CampgroundList({
   if (campgrounds.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4">🔍</div>
+        <Icon name="search" className="w-12 h-12 mb-4 text-stone-600" />
         <p className="text-stone-300 font-semibold">No campgrounds found</p>
         <p className="text-stone-500 text-sm mt-2">Try a larger search radius or different location</p>
       </div>

@@ -42,8 +42,12 @@ Colorado Camp Finder is a Next.js 14 app in `C:\Users\catad\Documents\Local Codi
 - `ALERT_EMAIL` — Gmail address for sending alerts
 - `ALERT_EMAIL_PASSWORD` — Gmail App Password (16-char, from Google Account security)
 
+### Phase 4 — Bug fixes & UX polish (2026-06-22)
+- **USFS public land**: `lib/sources/publicland.ts` now tries both `arcgis` and `arcx` USFS subdomains with 15s timeout; also accepts `GIS_ACRES1`/`AREAHECTARES` field aliases. Fixes areas like Leadville (mostly National Forest) showing no public land.
+- **Availability on-demand**: Removed auto-check useEffect. Campgrounds now show immediately after search (all gray/unknown). A "Check availability" button in the results bar triggers rec.gov checks for all visible campgrounds simultaneously, with a slim gradient progress bar while running.
+- **Location optional**: Search form no longer requires location text. Submitting with no location & no GPS falls back to current map viewport center (tracked via `onCenterChange` callback on CampgroundMap). `currentDates` initialized to next-weekend defaults so "Search campgrounds here" on map works without doing a form search first.
+
 ## Next phases to build
-- **Dispersed camping** — BLM/USFS public land overlay on map, dispersed spot suggestions with terrain flatness score and road access type
 - **Offline maps** — tile region download, spot bubble pre-cache, GPS position display (needs mobile/Capacitor or Electron)
 - **Mobile app** — React Native or Capacitor wrapping the web app
 - **User auth + sharing** — Supabase for accounts so watches/saved spots sync across devices/family

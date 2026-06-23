@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Icon from './Icon'
 import type { Watch } from '@/lib/db'
 
 const STATUS_STYLE: Record<string, string> = {
@@ -63,7 +64,7 @@ export default function WatchesPanel() {
   if (watches.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4">🔔</div>
+        <Icon name="bell" className="w-12 h-12 mb-4 text-stone-600" />
         <p className="text-stone-300 font-semibold">No active watches</p>
         <p className="text-stone-500 text-sm mt-2 leading-relaxed">
           When you find a full campground, click the bell icon to get an email when it opens up

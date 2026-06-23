@@ -2,11 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { getSaved, removeSaved } from '@/lib/saved'
+import Icon from './Icon'
 import type { SavedItem } from '@/lib/saved'
-
-const ACCESS_ICON: Record<string, string> = {
-  paved: '🚗', gravel: '🚙', '4wd': '🛻', 'walk-in': '🥾', unknown: '❓',
-}
 
 function SavedCampgroundRow({ item, onRemove }: { item: SavedItem; onRemove: () => void }) {
   const c = item.campground!
@@ -61,7 +58,6 @@ function SavedCampgroundRow({ item, onRemove }: { item: SavedItem; onRemove: () 
 
 function SavedDispersedRow({ item, onRemove }: { item: SavedItem; onRemove: () => void }) {
   const s = item.dispersed!
-  const accessIcon = ACCESS_ICON[s.roadAccess] ?? '❓'
   const landStyle = s.landType === 'BLM'
     ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
     : s.landType === 'USFS'
@@ -79,7 +75,7 @@ function SavedDispersedRow({ item, onRemove }: { item: SavedItem; onRemove: () =
             <p className="text-sm font-semibold text-white leading-snug truncate">{s.name}</p>
           </div>
           <p className="text-[11px] text-stone-500">
-            {s.flatnessRating} · {accessIcon} {s.roadAccess} · {s.distance.toFixed(1)} mi
+            {s.flatnessRating} · {s.roadAccess} · {s.distance.toFixed(1)} mi
             {s.elevationFt > 0 ? ` · ${s.elevationFt.toLocaleString()} ft` : ''}
           </p>
         </div>
@@ -134,7 +130,7 @@ export default function SavedPanel() {
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-        <div className="text-5xl mb-4">🔖</div>
+        <Icon name="bookmark" className="w-12 h-12 mb-4 text-stone-600" />
         <p className="text-stone-300 font-semibold">No saved spots yet</p>
         <p className="text-stone-500 text-sm mt-2 leading-relaxed">
           Tap the bookmark icon on any campground or dispersed spot to save it here. Saved spots are available offline.

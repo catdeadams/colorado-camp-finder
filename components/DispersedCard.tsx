@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { saveDispersed, removeSaved, isSaved } from '@/lib/saved'
+import Icon from './Icon'
 import type { DispersedSpot, FlatnessRating, RoadAccessType } from '@/lib/types'
 
 const FLATNESS_CONFIG: Record<FlatnessRating, { label: string; bar: number; color: string }> = {
@@ -13,12 +14,12 @@ const FLATNESS_CONFIG: Record<FlatnessRating, { label: string; bar: number; colo
   unknown:  { label: 'Unknown',  bar: 0, color: 'bg-stone-500' },
 }
 
-const ACCESS_CONFIG: Record<RoadAccessType, { label: string; icon: string; color: string }> = {
-  paved:    { label: 'Paved access',       icon: '🚗', color: 'text-green-400' },
-  gravel:   { label: 'Gravel/dirt access', icon: '🚙', color: 'text-amber-400' },
-  '4wd':    { label: '4WD track',          icon: '🛻', color: 'text-orange-400' },
-  'walk-in':{ label: 'Walk-in only',       icon: '🥾', color: 'text-red-400' },
-  unknown:  { label: 'Access unknown',     icon: '❓', color: 'text-stone-500' },
+const ACCESS_CONFIG: Record<RoadAccessType, { label: string; icon: 'car' | 'truck' | null; color: string }> = {
+  paved:    { label: 'Paved access',       icon: 'car',   color: 'text-green-400' },
+  gravel:   { label: 'Gravel access',      icon: 'car',   color: 'text-amber-400' },
+  '4wd':    { label: '4WD track',          icon: 'truck', color: 'text-orange-400' },
+  'walk-in':{ label: 'Walk-in only',       icon: null,    color: 'text-red-400' },
+  unknown:  { label: 'Access unknown',     icon: null,    color: 'text-stone-500' },
 }
 
 const LAND_BADGE: Record<string, { label: string; style: string }> = {
@@ -102,16 +103,17 @@ export default function DispersedCard({ spot, selected, onSelect }: Props) {
 
       {/* Stats row */}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-stone-500 mb-2">
-        <span>📍 {spot.distance.toFixed(1)} mi</span>
-        {spot.elevationFt > 0 && <span>🏔 {spot.elevationFt.toLocaleString()} ft</span>}
-        {spot.acreage > 0 && <span>📐 {spot.acreage.toLocaleString()} ac</span>}
+        <span>{spot.distance.toFixed(1)} mi away</span>
+        {spot.elevationFt > 0 && <span>{spot.elevationFt.toLocaleString()} ft</span>}
+        {spot.acreage > 0 && <span>{spot.acreage.toLocaleString()} ac</span>}
         {spot.slopeAngle > 0 && <span className="text-stone-600">{spot.slopeAngle.toFixed(1)}° slope</span>}
       </div>
 
       {/* Access + flat spots */}
       <div className="flex items-center justify-between mb-2.5">
-        <span className={`text-[11px] font-medium ${access.color}`}>
-          {access.icon} {access.label}
+        <span className={`flex items-center gap-1 text-[11px] font-medium ${access.color}`}>
+          {access.icon && <Icon name={access.icon} className="w-3 h-3" />}
+          {access.label}
           {spot.nearestRoadMiles > 0 && spot.nearestRoadMiles < 99
             ? ` · ${spot.nearestRoadMiles.toFixed(1)} mi to road`
             : ''}

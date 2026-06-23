@@ -4,6 +4,9 @@ import { analyzeTerrainAtPoint } from '@/lib/terrain'
 import { getNearestRoadAccess } from '@/lib/sources/roadaccess'
 import type { DispersedSpot, FlatnessRating, RoadAccessType } from '@/lib/types'
 
+// Allow up to 55s on Vercel (hobby plan cap is 60s)
+export const maxDuration = 55
+
 function estimateFlatSpots(acreage: number, slope: number): number {
   // Rough heuristic: ~1 decent spot per N acres depending on steepness
   if (slope < 3)  return Math.min(20, Math.max(1, Math.floor(acreage / 15)))
@@ -18,6 +21,7 @@ export async function GET(request: Request) {
   const lat = parseFloat(searchParams.get('lat') || '')
   const lng = parseFloat(searchParams.get('lng') || '')
   const radius = parseInt(searchParams.get('radius') || '50')
+  const vehicleType = searchParams.get('vehicleType') || 'awd'
 
   if (!lat || !lng) {
     return NextResponse.json({ error: 'Missing lat/lng' }, { status: 400 })
@@ -30,8 +34,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ spots: [], polygons: [], total: 0, message: 'No public land found in this area' })
     }
 
-    // Analyze terrain + road access for up to 12 spots in parallel
-    const targets = polygons.slice(0, 12)
+    // Analyze terrain + road access for up to 8 spots in parallel.
+    // Fewer = faster; each target makes ~6 external API calls.
+    const targets = polygons.slice(0, 8)
 
     const analyzed = await Promise.allSettled(
       targets.map(async (land) => {
@@ -69,9 +74,18 @@ export async function GET(request: Request) {
       })
     )
 
+    // Vehicle filter: car=paved only, awd=paved+gravel, 4wd=all
+    function isAccessible(access: RoadAccessType): boolean {
+      if (access === 'unknown') return true  // include unknowns regardless
+      if (vehicleType === 'car') return access === 'paved'
+      if (vehicleType === 'awd') return access === 'paved' || access === 'gravel'
+      return true  // 4wd can handle everything
+    }
+
     const spots: DispersedSpot[] = analyzed
       .filter((r): r is PromiseFulfilledResult<DispersedSpot> => r.status === 'fulfilled')
       .map((r) => r.value)
+      .filter((s) => isAccessible(s.roadAccess))
       .sort((a, b) => {
         const order: Record<string, number> = { flat: 0, gentle: 1, moderate: 2, hilly: 3, steep: 4, unknown: 5 }
         const fd = (order[a.flatnessRating] ?? 5) - (order[b.flatnessRating] ?? 5)

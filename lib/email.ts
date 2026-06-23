@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer'
 
 function createTransport() {
   const user = process.env.ALERT_EMAIL
-  const pass = process.env.ALERT_EMAIL_PASSWORD
+  const pass = process.env.ALERT_EMAIL_PASSWORD?.trim()
 
   if (!user || !pass) {
     throw new Error(
@@ -44,14 +44,13 @@ export async function sendAvailabilityAlert(params: {
   await transport.sendMail({
     from: `"Colorado Camp Finder" <${process.env.ALERT_EMAIL}>`,
     to: params.to,
-    subject: `⛺ ${sitesText} at ${params.campgroundName}`,
+    subject: `Campsite alert: ${sitesText} at ${params.campgroundName}`,
     html: `
 <!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background:#f5f5f0;font-family:system-ui,sans-serif;">
 <div style="max-width:500px;margin:32px auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
   <div style="background:#15803d;padding:24px 28px;">
-    <div style="font-size:32px;margin-bottom:8px;">⛺</div>
     <h1 style="margin:0;color:white;font-size:22px;font-weight:700;">Campsite Available!</h1>
     <p style="margin:6px 0 0;color:rgba(255,255,255,0.8);font-size:14px;">Your watchlist alert triggered</p>
   </div>

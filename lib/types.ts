@@ -1,10 +1,18 @@
+export type DateMode = 'exact' | 'flexible'
+export type AmenityFilter = 'waterfront' | 'restrooms' | 'drinkingWater' | 'hookups' | 'pets' | 'nearTown'
+
 export interface SearchParams {
   query: string
-  startDate: string  // YYYY-MM-DD
-  endDate: string    // YYYY-MM-DD
+  startDate: string   // exact mode check-in / flexible mode ignored
+  endDate: string     // exact mode check-out / flexible mode ignored
+  dateMode: DateMode
+  windowStart?: string  // flexible: start of window (YYYY-MM-DD)
+  windowEnd?: string    // flexible: end of window (YYYY-MM-DD)
+  tripNights?: number   // flexible: minimum consecutive nights desired
   radiusMiles: number
   vehicleType: 'car' | 'awd' | '4wd'
   enabledSources: SourceKey[]
+  amenities: AmenityFilter[]
   gpsLat?: number   // if set, skip geocoding
   gpsLng?: number
 }

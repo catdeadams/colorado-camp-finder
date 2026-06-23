@@ -17,7 +17,7 @@ async function fetchElevation(lat: number, lng: number): Promise<number | null> 
         ? `${base}?x=${lng}&y=${lat}&units=Feet&output=json`
         : `${base}?x=${lng}&y=${lat}&units=Feet&includeDate=false`
 
-      const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
       if (!res.ok) continue
 
       const data = await res.json()

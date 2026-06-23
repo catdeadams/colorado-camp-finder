@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { saveCampground, removeSaved, isSaved } from '@/lib/saved'
+import Icon from './Icon'
 import type { Campground } from '@/lib/types'
 
 const STATUS = {
@@ -82,7 +83,7 @@ export default function CampgroundCard({ campground, selected, onSelect, onWatch
               title="Watch for availability"
               className="p-1 text-stone-500 hover:text-amber-400 transition-colors"
             >
-              🔔
+              <Icon name="bell" className="w-3.5 h-3.5" />
             </button>
           )}
           <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${s.badge}`}>

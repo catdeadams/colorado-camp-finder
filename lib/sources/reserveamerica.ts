@@ -119,7 +119,7 @@ export async function searchColoradoStateParks(
             availability,
             availableSites: available,
             totalSites: total,
-            reserveUrl: `https://coloradostateparks.reserveamerica.com/camping/campgrounds/${parkId}`,
+            reserveUrl: `https://coloradostateparks.reserveamerica.com/campsiteSearch.do?contractCode=CO&parkId=${parkId}`,
             directionsUrl: `https://www.google.com/maps/dir/?api=1&destination=${park.latitude},${park.longitude}`,
             amenities: [],
             campgroundType: 'Colorado State Park',

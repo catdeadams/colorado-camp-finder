@@ -78,7 +78,7 @@ export async function searchIOverlander(
         const distance = haversineDistance(lat, lng, placeLat, placeLng)
         if (distance > radiusMiles) return null
 
-        const ratingStr = place.rating ? `⭐ ${Number(place.rating).toFixed(1)}` : ''
+        const ratingStr = place.rating ? `${Number(place.rating).toFixed(1)} stars` : ''
         const reviewStr = place.reviews_count ? `${place.reviews_count} reviews` : ''
         const desc = [place.description?.slice(0, 120), ratingStr, reviewStr]
           .filter(Boolean)

@@ -36,7 +36,6 @@ export async function searchCampgrounds(
     latitude: lat.toString(),
     longitude: lng.toString(),
     radius: radiusMiles.toString(),
-    state: 'CO',
     limit: '50',
     full: 'true',
     apikey: getApiKey(),
@@ -70,7 +69,12 @@ export async function getCampgroundAvailability(
       try {
         const url = `${AVAIL_BASE}/${facilityId}/month?start_date=${monthStart.toISOString()}`
         const res = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ColoradoCampingFinder/1.0)' },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.recreation.gov/',
+          },
+          signal: AbortSignal.timeout(7000),
           next: { revalidate: 900 },
         })
         if (!res.ok) return

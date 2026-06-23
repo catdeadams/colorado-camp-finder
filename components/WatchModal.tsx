@@ -62,7 +62,9 @@ export default function WatchModal({ campground, startDate, endDate, onClose, on
         <div className="p-5">
           {done ? (
             <div className="text-center py-4">
-              <div className="text-4xl mb-3">🔔</div>
+              <div className="flex justify-center mb-3">
+                <svg className="w-10 h-10 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              </div>
               <h3 className="text-white font-bold text-lg mb-2">Watch saved!</h3>
               <p className="text-stone-400 text-sm">
                 We&apos;ll email <strong className="text-white">{email}</strong> the moment a site opens up.
@@ -123,7 +125,7 @@ export default function WatchModal({ campground, startDate, endDate, onClose, on
                       Saving...
                     </>
                   ) : (
-                    '🔔 Watch this campground'
+                    'Watch this campground'
                   )}
                 </button>
 

@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import Icon from './Icon'
 import type { Campground, DispersedSpot, PublicLandFeature } from '@/lib/types'
 
 interface Props {
@@ -14,6 +15,12 @@ interface Props {
   publicLandPolygons?: PublicLandFeature[]
   selectedDispersedId?: string | null
   onSelectDispersed?: (id: string) => void
+  savedCampgrounds?: Campground[]
+  showSaved?: boolean
+  onToggleSaved?: () => void
+  onSearchArea?: (lat: number, lng: number, radiusMiles: number) => void
+  onCenterChange?: (lat: number, lng: number) => void
+  hasSearched?: boolean
 }
 
 const COLORS: Record<string, string> = {
@@ -37,7 +44,6 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
   layers: [{ id: 'osm-tiles', type: 'raster', source: 'osm' }],
 }
 
-// ── Tile math for offline cache ───────────────────────────────────────────────
 function lonToTileX(lon: number, z: number) {
   return Math.floor(((lon + 180) / 360) * 2 ** z)
 }
@@ -61,14 +67,13 @@ function getTileUrls(bounds: maplibregl.LngLatBounds, minZ: number, maxZ: number
   return urls
 }
 
-// ── Popup HTML builders ───────────────────────────────────────────────────────
 function buildPopupHTML(c: Campground): string {
   const color = COLORS[c.availability]
   const canReserve = c.availability === 'available' || c.availability === 'limited'
   const siteText =
     c.totalSites > 0
       ? canReserve ? `${c.availableSites}/${c.totalSites} sites open` : `${c.totalSites} sites — full`
-      : c.availability
+      : c.availability === 'unknown' ? 'Availability not checked' : c.availability
 
   return `
     <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:240px;">
@@ -85,7 +90,7 @@ function buildPopupHTML(c: Campground): string {
 }
 
 function buildDispersedPopupHTML(s: DispersedSpot): string {
-  const accessIcons: Record<string, string> = { paved: '🚗', gravel: '🚙', '4wd': '🛻', 'walk-in': '🥾', unknown: '❓' }
+  const accessLabel: Record<string, string> = { paved: 'Paved road', gravel: 'Gravel road', '4wd': '4WD track', 'walk-in': 'Walk-in only', unknown: 'Access unknown' }
   return `
     <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:240px;">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
@@ -98,7 +103,7 @@ function buildDispersedPopupHTML(s: DispersedSpot): string {
         ${s.elevationFt > 0 ? ` · ${s.elevationFt.toLocaleString()} ft` : ''}
       </div>
       <div style="font-size:11px;color:#57534e;margin-bottom:8px;">
-        ${accessIcons[s.roadAccess] ?? '❓'} ${s.roadAccess} · ${s.distance.toFixed(1)} mi away
+        ${accessLabel[s.roadAccess] ?? 'Unknown access'} · ${s.distance.toFixed(1)} mi away
         ${s.estimatedFlatSpots > 0 ? ` · ~${s.estimatedFlatSpots} flat spot${s.estimatedFlatSpots !== 1 ? 's' : ''}` : ''}
       </div>
       <div style="display:flex;gap:6px;">
@@ -108,7 +113,18 @@ function buildDispersedPopupHTML(s: DispersedSpot): string {
     </div>`
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+function buildSavedPopupHTML(c: Campground): string {
+  return `
+    <div style="font-family:system-ui,sans-serif;min-width:180px;max-width:220px;">
+      <div style="font-size:10px;font-weight:700;color:#d97706;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Saved</div>
+      <div style="font-weight:700;font-size:13px;color:#0c0a09;margin-bottom:8px;">${c.name}</div>
+      <div style="display:flex;gap:6px;">
+        <a href="${c.reserveUrl}" target="_blank" rel="noopener noreferrer" style="flex:1;display:block;text-align:center;background:#92400e;color:white;padding:5px 8px;border-radius:6px;text-decoration:none;font-size:11px;font-weight:600;">View</a>
+        <a href="${c.directionsUrl}" target="_blank" rel="noopener noreferrer" style="display:block;text-align:center;background:#44403c;color:#d6d3d1;padding:5px 8px;border-radius:6px;text-decoration:none;font-size:11px;font-weight:600;">↗ Dirs</a>
+      </div>
+    </div>`
+}
+
 export default function CampgroundMap({
   campgrounds,
   center,
@@ -118,17 +134,42 @@ export default function CampgroundMap({
   publicLandPolygons = [],
   selectedDispersedId = null,
   onSelectDispersed,
+  savedCampgrounds = [],
+  showSaved = true,
+  onToggleSaved,
+  onSearchArea,
+  onCenterChange,
+  hasSearched = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
-  const markersRef = useRef<Map<string, { marker: maplibregl.Marker; el: HTMLDivElement }>>(new Map())
-  const dispersedMarkersRef = useRef<Map<string, { marker: maplibregl.Marker; el: HTMLDivElement }>>(new Map())
+  const markersRef = useRef<Map<string, { marker: maplibregl.Marker; el: HTMLDivElement; inner: HTMLDivElement }>>(new Map())
+  const dispersedMarkersRef = useRef<Map<string, { marker: maplibregl.Marker; el: HTMLDivElement; inner: HTMLDivElement }>>(new Map())
+  const savedMarkersRef = useRef<Map<string, { marker: maplibregl.Marker }>>(new Map())
   const activePopup = useRef<maplibregl.Popup | null>(null)
+  const selectedIdRef = useRef<string | null>(selectedId)
+  const selectedDispersedIdRef = useRef<string | null>(selectedDispersedId)
 
-  // Offline cache button state
   const [cacheState, setCacheState] = useState<'idle' | 'caching' | 'done'>('idle')
   const [cacheProgress, setCacheProgress] = useState({ done: 0, total: 0 })
   const [swReady, setSwReady] = useState(false)
+  const [mapMoved, setMapMoved] = useState(false)
+
+  const onCenterChangeRef = useRef(onCenterChange)
+  useEffect(() => { onCenterChangeRef.current = onCenterChange }, [onCenterChange])
+
+  // Keep refs in sync so event listener closures always see current selected ID
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  useEffect(() => { selectedDispersedIdRef.current = selectedDispersedId }, [selectedDispersedId])
+
+  const closeHoverPopup = useCallback((id: string, isDispersed: boolean) => {
+    // Only close the popup if this item isn't selected
+    const selectedRef = isDispersed ? selectedDispersedIdRef : selectedIdRef
+    if (selectedRef.current !== id) {
+      activePopup.current?.remove()
+      if (activePopup.current?.isOpen() === false) activePopup.current = null
+    }
+  }, [])
 
   // ── Init map ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -141,11 +182,16 @@ export default function CampgroundMap({
     })
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left')
+    map.on('moveend', () => {
+      setMapMoved(true)
+      const c = map.getCenter()
+      onCenterChangeRef.current?.(c.lat, c.lng)
+    })
     mapRef.current = map
     return () => { map.remove(); mapRef.current = null }
   }, [])
 
-  // ── Service Worker readiness + message listener ───────────────────────────
+  // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
     navigator.serviceWorker.ready.then(() => setSwReady(true))
@@ -174,16 +220,32 @@ export default function CampgroundMap({
     navigator.serviceWorker.controller.postMessage({ type: 'CACHE_TILES', urls })
   }
 
+  function handleSearchArea() {
+    const map = mapRef.current
+    if (!map || !onSearchArea) return
+    const center = map.getCenter()
+    const bounds = map.getBounds()
+    // Radius = distance from center to NE corner (half diagonal)
+    const ne = bounds.getNorthEast()
+    const R = 3959
+    const dLat = ((ne.lat - center.lat) * Math.PI) / 180
+    const dLng = ((ne.lng - center.lng) * Math.PI) / 180
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((center.lat * Math.PI) / 180) * Math.cos((ne.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+    const radiusMiles = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
+    setMapMoved(false)
+    onSearchArea(center.lat, center.lng, Math.min(radiusMiles, 150))
+  }
+
   // ── Public land polygons ──────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
     if (!map || publicLandPolygons.length === 0) return
-
     const add = () => {
       if (map.getLayer('public-land-fill')) map.removeLayer('public-land-fill')
       if (map.getLayer('public-land-outline')) map.removeLayer('public-land-outline')
       if (map.getSource('public-land')) map.removeSource('public-land')
-
       map.addSource('public-land', {
         type: 'geojson',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -218,19 +280,54 @@ export default function CampgroundMap({
     }
 
     for (const cg of campgrounds) {
-      if (markersRef.current.has(cg.id) || !cg.lat || !cg.lng) continue
+      if (!cg.lat || !cg.lng) continue
+      const existing = markersRef.current.get(cg.id)
+
+      if (existing) {
+        // Update popup HTML and inner color if availability changed
+        existing.marker.getPopup()?.setHTML(buildPopupHTML(cg))
+        existing.inner.style.background = COLORS[cg.availability]
+        continue
+      }
+
       const color = COLORS[cg.availability]
       const el = document.createElement('div')
-      el.style.cssText = `width:30px;height:30px;border-radius:50%;background:${color};border:3px solid white;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:13px;transition:transform .15s,box-shadow .15s;`
-      el.textContent = '⛺'; el.title = cg.name
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.25)'; el.style.boxShadow = '0 4px 16px rgba(0,0,0,.5)' })
-      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.boxShadow = '0 2px 10px rgba(0,0,0,.45)' })
+      el.style.cssText = 'width:30px;height:30px;cursor:pointer;'
+      el.title = cg.name
+      const inner = document.createElement('div')
+      inner.style.cssText = `width:30px;height:30px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 2px 10px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;transition:transform .15s,box-shadow .15s;`
+      inner.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M3 20L12 6l9 14"/><path d="M2 20h20"/><path d="M9 20v-4h6v4"/></svg>`
+      el.appendChild(inner)
+
       const popup = new maplibregl.Popup({ offset: 18, closeButton: true, maxWidth: '260px' }).setHTML(buildPopupHTML(cg))
       const marker = new maplibregl.Marker({ element: el }).setLngLat([cg.lng, cg.lat]).setPopup(popup).addTo(map)
-      el.addEventListener('click', () => { onSelect(cg.id); activePopup.current?.remove(); marker.togglePopup(); activePopup.current = popup })
-      markersRef.current.set(cg.id, { marker, el })
+
+      el.addEventListener('mouseenter', () => {
+        inner.style.transform = 'scale(1.25)'
+        inner.style.boxShadow = '0 4px 16px rgba(0,0,0,.5)'
+        if (!popup.isOpen()) {
+          activePopup.current?.remove()
+          marker.togglePopup()
+          activePopup.current = popup
+        }
+      })
+      el.addEventListener('mouseleave', () => {
+        inner.style.transform = 'scale(1)'
+        inner.style.boxShadow = '0 2px 10px rgba(0,0,0,.45)'
+        closeHoverPopup(cg.id, false)
+      })
+      el.addEventListener('click', () => {
+        onSelect(cg.id)
+        if (!popup.isOpen()) {
+          activePopup.current?.remove()
+          marker.togglePopup()
+          activePopup.current = popup
+        }
+      })
+
+      markersRef.current.set(cg.id, { marker, el, inner })
     }
-  }, [campgrounds, onSelect])
+  }, [campgrounds, onSelect, closeHoverPopup])
 
   // ── Dispersed markers ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -246,29 +343,94 @@ export default function CampgroundMap({
       for (const spot of dispersedSpots) {
         if (dispersedMarkersRef.current.has(spot.id) || !spot.lat || !spot.lng) continue
         const el = document.createElement('div')
-        el.style.cssText = `width:28px;height:28px;border-radius:50%;background:#ea580c;border:2.5px solid #fff7ed;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .15s,box-shadow .15s;`
-        el.textContent = '🌲'; el.title = spot.name
-        el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.25)'; el.style.boxShadow = '0 4px 14px rgba(0,0,0,.55)' })
-        el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.boxShadow = '0 2px 8px rgba(0,0,0,.45)' })
+        el.style.cssText = 'width:26px;height:26px;cursor:pointer;'
+        el.title = spot.name
+        const inner = document.createElement('div')
+        inner.style.cssText = 'width:26px;height:26px;border-radius:50%;background:#ea580c;border:2.5px solid #fff7ed;box-shadow:0 2px 8px rgba(0,0,0,.45);transition:transform .15s,box-shadow .15s;'
+        el.appendChild(inner)
+
         const popup = new maplibregl.Popup({ offset: 18, closeButton: true, maxWidth: '260px' }).setHTML(buildDispersedPopupHTML(spot))
         const marker = new maplibregl.Marker({ element: el }).setLngLat([spot.lng, spot.lat]).setPopup(popup).addTo(map)
-        el.addEventListener('click', () => { onSelectDispersed?.(spot.id); activePopup.current?.remove(); marker.togglePopup(); activePopup.current = popup })
-        dispersedMarkersRef.current.set(spot.id, { marker, el })
+
+        el.addEventListener('mouseenter', () => {
+          inner.style.transform = 'scale(1.25)'
+          inner.style.boxShadow = '0 4px 14px rgba(0,0,0,.55)'
+          if (!popup.isOpen()) {
+            activePopup.current?.remove()
+            marker.togglePopup()
+            activePopup.current = popup
+          }
+        })
+        el.addEventListener('mouseleave', () => {
+          inner.style.transform = 'scale(1)'
+          inner.style.boxShadow = '0 2px 8px rgba(0,0,0,.45)'
+          closeHoverPopup(spot.id, true)
+        })
+        el.addEventListener('click', () => {
+          onSelectDispersed?.(spot.id)
+          if (!popup.isOpen()) {
+            activePopup.current?.remove()
+            marker.togglePopup()
+            activePopup.current = popup
+          }
+        })
+        dispersedMarkersRef.current.set(spot.id, { marker, el, inner })
       }
     }
     if (map.isStyleLoaded()) addMarkers(); else map.once('load', addMarkers)
-  }, [dispersedSpots, onSelectDispersed])
+  }, [dispersedSpots, onSelectDispersed, closeHoverPopup])
+
+  // ── Saved campground markers ──────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    // Remove all saved markers first (list may have changed or toggle fired)
+    for (const [, { marker }] of savedMarkersRef.current) marker.remove()
+    savedMarkersRef.current.clear()
+
+    if (!showSaved) return
+
+    for (const cg of savedCampgrounds) {
+      if (!cg.lat || !cg.lng) continue
+      const el = document.createElement('div')
+      el.style.cssText = 'width:28px;height:28px;cursor:pointer;'
+      el.title = cg.name
+      const inner = document.createElement('div')
+      inner.style.cssText = 'width:28px;height:28px;border-radius:50%;background:#d97706;border:3px solid #fef3c7;box-shadow:0 2px 10px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;transition:transform .15s;'
+      inner.innerHTML = `<svg viewBox="0 0 24 24" fill="white" stroke="none" style="width:11px;height:11px"><path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg>`
+      el.appendChild(inner)
+
+      const popup = new maplibregl.Popup({ offset: 16, closeButton: true, maxWidth: '240px' }).setHTML(buildSavedPopupHTML(cg))
+      const marker = new maplibregl.Marker({ element: el }).setLngLat([cg.lng, cg.lat]).setPopup(popup).addTo(map)
+
+      el.addEventListener('mouseenter', () => {
+        inner.style.transform = 'scale(1.2)'
+        if (!popup.isOpen()) { activePopup.current?.remove(); marker.togglePopup(); activePopup.current = popup }
+      })
+      el.addEventListener('mouseleave', () => {
+        inner.style.transform = 'scale(1)'
+        if (popup.isOpen()) { popup.remove() }
+      })
+      el.addEventListener('click', () => {
+        if (!popup.isOpen()) { activePopup.current?.remove(); marker.togglePopup(); activePopup.current = popup }
+      })
+
+      savedMarkersRef.current.set(cg.id, { marker })
+    }
+  }, [savedCampgrounds, showSaved])
 
   // ── Fly to search center ──────────────────────────────────────────────────
   useEffect(() => {
     if (!mapRef.current || !center) return
     mapRef.current.flyTo({ center: [center.lng, center.lat], zoom: 10, duration: 1400, essential: true })
+    setMapMoved(false)
   }, [center])
 
   // ── Highlight selected campground ─────────────────────────────────────────
   useEffect(() => {
-    for (const [id, { el }] of markersRef.current) {
-      el.style.transform = id === selectedId ? 'scale(1.35)' : 'scale(1)'
+    for (const [id, { el, inner }] of markersRef.current) {
+      inner.style.transform = id === selectedId ? 'scale(1.35)' : 'scale(1)'
       el.style.zIndex = id === selectedId ? '10' : '0'
     }
     if (!selectedId) return
@@ -276,13 +438,17 @@ export default function CampgroundMap({
     const entry = cg && markersRef.current.get(selectedId)
     if (!entry || !cg) return
     mapRef.current?.easeTo({ center: [cg.lng, cg.lat], zoom: Math.max(12, mapRef.current.getZoom()), duration: 600 })
-    activePopup.current?.remove(); entry.marker.togglePopup(); activePopup.current = entry.marker.getPopup()
+    if (!entry.marker.getPopup()?.isOpen()) {
+      activePopup.current?.remove()
+      entry.marker.togglePopup()
+      activePopup.current = entry.marker.getPopup()
+    }
   }, [selectedId, campgrounds])
 
   // ── Highlight selected dispersed spot ─────────────────────────────────────
   useEffect(() => {
-    for (const [id, { el }] of dispersedMarkersRef.current) {
-      el.style.transform = id === selectedDispersedId ? 'scale(1.35)' : 'scale(1)'
+    for (const [id, { el, inner }] of dispersedMarkersRef.current) {
+      inner.style.transform = id === selectedDispersedId ? 'scale(1.35)' : 'scale(1)'
       el.style.zIndex = id === selectedDispersedId ? '10' : '5'
     }
     if (!selectedDispersedId) return
@@ -290,7 +456,11 @@ export default function CampgroundMap({
     const entry = spot && dispersedMarkersRef.current.get(selectedDispersedId)
     if (!entry || !spot) return
     mapRef.current?.easeTo({ center: [spot.lng, spot.lat], zoom: Math.max(12, mapRef.current?.getZoom() ?? 10), duration: 600 })
-    activePopup.current?.remove(); entry.marker.togglePopup(); activePopup.current = entry.marker.getPopup()
+    if (!entry.marker.getPopup()?.isOpen()) {
+      activePopup.current?.remove()
+      entry.marker.togglePopup()
+      activePopup.current = entry.marker.getPopup()
+    }
   }, [selectedDispersedId, dispersedSpots])
 
   const hasDispersed = dispersedSpots.length > 0
@@ -299,9 +469,53 @@ export default function CampgroundMap({
     <div className="relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" />
 
+      {/* "Search this area" button — appears after map is panned */}
+      {onSearchArea && mapMoved && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={handleSearchArea}
+            className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-stone-50 text-stone-900 rounded-full text-sm font-semibold shadow-xl border border-stone-200 transition-all"
+          >
+            <Icon name="search" className="w-3.5 h-3.5" />
+            Search this area
+          </button>
+        </div>
+      )}
+
+      {/* Initial "Search here" prompt when map hasn't been searched yet */}
+      {onSearchArea && !hasSearched && !mapMoved && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={handleSearchArea}
+            className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-stone-50 text-stone-900 rounded-full text-sm font-semibold shadow-xl border border-stone-200 transition-all"
+          >
+            <Icon name="search" className="w-3.5 h-3.5" />
+            Search campgrounds here
+          </button>
+        </div>
+      )}
+
+      {/* Saved toggle */}
+      {onToggleSaved && (
+        <div className="absolute top-14 right-3 z-10 flex flex-col gap-1.5">
+          <button
+            onClick={onToggleSaved}
+            title={showSaved ? 'Hide saved spots' : 'Show saved spots'}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold shadow-lg backdrop-blur-sm transition-all border ${
+              showSaved
+                ? 'bg-amber-600/90 text-white border-amber-500/50'
+                : 'bg-stone-900/90 hover:bg-stone-800/90 text-stone-400 border-stone-700/50'
+            }`}
+          >
+            <Icon name="bookmark" className="w-3 h-3" />
+            Saved
+          </button>
+        </div>
+      )}
+
       {/* Offline cache button */}
       {swReady && (
-        <div className="absolute top-14 right-3 z-10">
+        <div className={`absolute z-10 ${onToggleSaved ? 'top-[74px]' : 'top-14'} right-3 mt-8`}>
           <button
             onClick={handleCacheArea}
             disabled={cacheState === 'caching'}
@@ -314,9 +528,13 @@ export default function CampgroundMap({
                   : 'bg-stone-900/90 hover:bg-stone-800/90 text-stone-300 border border-stone-700/50'
             }`}
           >
-            {cacheState === 'done' ? '✓ Cached offline' :
-             cacheState === 'caching' ? `⬇ ${cacheProgress.done}/${cacheProgress.total}` :
-             '⬇ Save map area'}
+            {cacheState === 'done' ? (
+              <><Icon name="check" className="w-3 h-3" /> Cached</>
+            ) : cacheState === 'caching' ? (
+              `${cacheProgress.done}/${cacheProgress.total} tiles`
+            ) : (
+              'Save map offline'
+            )}
           </button>
         </div>
       )}
@@ -354,7 +572,7 @@ export default function CampgroundMap({
       {campgrounds.length === 0 && dispersedSpots.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="bg-stone-900/80 backdrop-blur-sm rounded-2xl px-6 py-4 text-center border border-stone-700/40">
-            <div className="text-3xl mb-2">🗺️</div>
+            <Icon name="map" className="w-8 h-8 text-stone-600 mb-2" />
             <p className="text-stone-400 text-sm font-medium">Search to see campgrounds on the map</p>
           </div>
         </div>

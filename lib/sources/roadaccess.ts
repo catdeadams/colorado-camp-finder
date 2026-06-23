@@ -3,6 +3,7 @@ import type { RoadAccessType } from '../types'
 const OVERPASS_HOSTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ]
 
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -33,7 +34,7 @@ export async function getNearestRoadAccess(lat: number, lng: number): Promise<{
   highwayTag: string
 }> {
   // Search within ~1.5 miles (2400m)
-  const query = `[out:json][timeout:8];
+  const query = `[out:json][timeout:5];
 way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|track|service)$"](around:2400,${lat},${lng});
 out tags center;`
 
@@ -43,7 +44,7 @@ out tags center;`
         method: 'POST',
         body: `data=${encodeURIComponent(query)}`,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(6000),
       })
       if (!res.ok) continue
 
