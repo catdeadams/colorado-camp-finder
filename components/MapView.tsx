@@ -5,6 +5,7 @@ import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { FeatureCollection } from 'geojson'
 import { TOPO_STYLE, CO_CENTER } from '@/lib/basemap'
+import { loadPublicLand, loadMVUM } from '@/lib/dataset'
 import type { Campground, PinStatus } from '@/lib/types'
 import type { SavedSite } from '@/lib/store'
 
@@ -20,6 +21,9 @@ interface Props {
   onBoundsChange?: (b: MapBounds) => void
   dropMode?: boolean
   onMapPoint?: (lat: number, lng: number) => void
+  showPublicLand?: boolean
+  showRoads?: boolean
+  showHillshade?: boolean
 }
 
 function statusOf(c: Campground): PinStatus {
@@ -58,6 +62,7 @@ function savedFC(sites: SavedSite[]): FeatureCollection {
 export default function MapView({
   campgrounds, selectedId, onSelect, center, savedSites = [], showSaved = true, onBoundsChange,
   dropMode = false, onMapPoint,
+  showPublicLand = false, showRoads = false, showHillshade = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -67,6 +72,7 @@ export default function MapView({
   const prevSelected = useRef<string | null>(null)
   const onMapPointRef = useRef(onMapPoint)
   const dropModeRef = useRef(dropMode)
+  const dataLoadedRef = useRef({ publicLand: false, roads: false })
   useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
   useEffect(() => { onBoundsRef.current = onBoundsChange }, [onBoundsChange])
   useEffect(() => { onMapPointRef.current = onMapPoint }, [onMapPoint])
@@ -125,6 +131,48 @@ export default function MapView({
           'circle-opacity': 0.9,
         },
       })
+
+      // ── dispersed-intel layers (below pins; hidden until toggled) ──
+      map.addSource('dem', {
+        type: 'raster-dem',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        encoding: 'terrarium', tileSize: 256, maxzoom: 13,
+      })
+      map.addLayer({
+        id: 'hillshade', type: 'hillshade', source: 'dem', minzoom: 7, layout: { visibility: 'none' },
+        paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#3a2f1d', 'hillshade-highlight-color': '#fff8e7' },
+      }, 'camp-circles')
+      map.addSource('publicland', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      map.addLayer({
+        id: 'publicland-fill', type: 'fill', source: 'publicland', minzoom: 8, layout: { visibility: 'none' },
+        paint: {
+          'fill-color': ['match', ['get', 'agency'],
+            'BLM', '#ca8a04', 'USFS', '#15803d', 'USFS_LU', '#15803d', 'USFS_NG', '#15803d',
+            'NPS', '#7e22ce', 'STA', '#0284c7', 'BOR', '#0d9488', 'USFW', '#be185d', '#6b7280'],
+          'fill-opacity': 0.2,
+        },
+      }, 'camp-circles')
+      map.addLayer({
+        id: 'publicland-outline', type: 'line', source: 'publicland', minzoom: 8, layout: { visibility: 'none' },
+        paint: {
+          'line-color': ['match', ['get', 'agency'],
+            'BLM', '#ca8a04', 'USFS', '#15803d', 'USFS_LU', '#15803d', 'USFS_NG', '#15803d',
+            'NPS', '#7e22ce', 'STA', '#0284c7', 'BOR', '#0d9488', 'USFW', '#be185d', '#6b7280'],
+          'line-opacity': 0.45, 'line-width': 0.6,
+        },
+      }, 'camp-circles')
+      map.addSource('mvum', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      map.addLayer({
+        id: 'mvum-roads', type: 'line', source: 'mvum', minzoom: 8, layout: { visibility: 'none', 'line-cap': 'round' },
+        paint: {
+          'line-color': ['case',
+            ['==', ['get', 'car'], 'open'], '#16a34a',
+            ['==', ['get', 'hc'], 'open'], '#f59e0b',
+            ['==', ['get', 'fourwd'], 'open'], '#dc2626', '#9ca3af'],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 13, 2.2],
+          'line-opacity': 0.8,
+        },
+      }, 'camp-circles')
 
       map.on('click', 'camp-circles', (e) => {
         const f = e.features?.[0]
@@ -191,6 +239,32 @@ export default function MapView({
     if (!map || !readyRef.current) return
     map.getCanvas().style.cursor = dropMode ? 'crosshair' : ''
   }, [dropMode])
+
+  // ── dispersed-intel layer toggles (visibility sync; data loaded lazily once) ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !readyRef.current) return
+    const setVis = (id: string, on: boolean) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none')
+    }
+    setVis('hillshade', showHillshade)
+    setVis('publicland-fill', showPublicLand)
+    setVis('publicland-outline', showPublicLand)
+    setVis('mvum-roads', showRoads)
+
+    if (showPublicLand && !dataLoadedRef.current.publicLand) {
+      dataLoadedRef.current.publicLand = true
+      loadPublicLand()
+        .then((d) => { (map.getSource('publicland') as GeoJSONSource | undefined)?.setData(d) })
+        .catch(() => { dataLoadedRef.current.publicLand = false })
+    }
+    if (showRoads && !dataLoadedRef.current.roads) {
+      dataLoadedRef.current.roads = true
+      loadMVUM()
+        .then((d) => { (map.getSource('mvum') as GeoJSONSource | undefined)?.setData(d) })
+        .catch(() => { dataLoadedRef.current.roads = false })
+    }
+  }, [showPublicLand, showRoads, showHillshade])
 
   return <div ref={containerRef} className="absolute inset-0" />
 }

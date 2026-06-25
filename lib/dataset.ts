@@ -1,3 +1,4 @@
+import type { FeatureCollection } from 'geojson'
 import type { Campground } from './types'
 
 // Shape of records in /public/data/co-campgrounds.json (produced by scripts/build-co-pack.mjs)
@@ -51,4 +52,25 @@ function toCampground(r: RawCampground): Campground {
     photo: r.photo,
     recAreaId: r.recAreaId,
   }
+}
+
+let plCache: FeatureCollection | null = null
+let mvumCache: FeatureCollection | null = null
+
+/** Public-land polygons (BLM/USFS/NPS/State/…), agency in properties.agency. */
+export async function loadPublicLand(): Promise<FeatureCollection> {
+  if (plCache) return plCache
+  const res = await fetch('/data/co-public-land.geojson')
+  if (!res.ok) throw new Error('Failed to load public land')
+  plCache = await res.json()
+  return plCache!
+}
+
+/** MVUM forest roads; properties.car/hc/fourwd = 'open' when that vehicle class is allowed. */
+export async function loadMVUM(): Promise<FeatureCollection> {
+  if (mvumCache) return mvumCache
+  const res = await fetch('/data/co-mvum-roads.geojson')
+  if (!res.ok) throw new Error('Failed to load MVUM roads')
+  mvumCache = await res.json()
+  return mvumCache!
 }
