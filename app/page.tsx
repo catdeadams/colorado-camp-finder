@@ -1,464 +1,257 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
-import SearchForm from '@/components/SearchForm'
-import CampgroundList from '@/components/CampgroundList'
-import WatchesPanel from '@/components/WatchesPanel'
-import WatchModal from '@/components/WatchModal'
-import DispersedPanel from '@/components/DispersedPanel'
-import SavedPanel from '@/components/SavedPanel'
 import Icon from '@/components/Icon'
-import { getSaved } from '@/lib/saved'
-import { checkCampgroundAvailability, checkFlexibleAvailability } from '@/lib/availabilityClient'
-import type { Campground, DispersedSpot, PublicLandFeature, SearchParams, AvailabilityStatus } from '@/lib/types'
+import { loadCampgrounds } from '@/lib/dataset'
+import { checkCampgroundAvailability } from '@/lib/availabilityClient'
+import { listSaved, saveCampground, removeSaved, type SavedSite } from '@/lib/store'
+import { STATUS_COLORS } from '@/lib/basemap'
+import type { Campground, PinStatus } from '@/lib/types'
+import type { MapBounds } from '@/components/MapView'
 
-const CampgroundMap = dynamic(() => import('@/components/CampgroundMap'), {
+const MapView = dynamic(() => import('@/components/MapView'), {
   ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex items-center justify-center bg-stone-900">
-      <p className="text-stone-600 text-sm">Loading map...</p>
-    </div>
-  ),
+  loading: () => <div className="absolute inset-0 grid place-items-center bg-stone-200 text-stone-500 text-sm">Loading map…</div>,
 })
-
-type SidebarTab = 'search' | 'dispersed' | 'saved' | 'watches'
-
-interface AvailOverride {
-  status: AvailabilityStatus
-  availableSites: number
-  totalSites: number
-}
 
 function nextWeekendDefaults() {
   const now = new Date()
   const day = now.getDay()
-  const daysToFriday = day <= 5 ? (5 - day || 7) : 6
-  const friday = new Date(now)
-  friday.setDate(now.getDate() + daysToFriday)
-  const sunday = new Date(friday)
-  sunday.setDate(friday.getDate() + 2)
+  const toFri = day <= 5 ? (5 - day || 7) : 6
+  const fri = new Date(now); fri.setDate(now.getDate() + toFri)
+  const sun = new Date(fri); sun.setDate(fri.getDate() + 2)
   const fmt = (d: Date) => d.toISOString().split('T')[0]
-  return { startDate: fmt(friday), endDate: fmt(sunday) }
+  return { start: fmt(fri), end: fmt(sun) }
+}
+
+async function runWithLimit<T>(items: T[], limit: number, fn: (t: T) => Promise<void>) {
+  let i = 0
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) { const idx = i++; await fn(items[idx]) }
+    }),
+  )
+}
+
+function pinStatus(c: Campground): PinStatus {
+  if (c.reserveType === 'first-come') return 'first-come'
+  return (c.availability as PinStatus) ?? 'unknown'
+}
+
+const STATUS_LABEL: Record<PinStatus, string> = {
+  available: 'Available', limited: 'Limited', full: 'Full',
+  'first-come': 'First-come, first-served', unknown: 'Not checked',
 }
 
 export default function HomePage() {
-  const [tab, setTab] = useState<SidebarTab>('search')
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-
-  // Campground search state
   const [campgrounds, setCampgrounds] = useState<Campground[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null)
-  const [mapViewCenter, setMapViewCenter] = useState({ lat: 39.5501, lng: -105.7821 })
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [hasSearched, setHasSearched] = useState(false)
-  const [currentDates, setCurrentDates] = useState(() => {
-    const d = nextWeekendDefaults()
-    return { startDate: d.startDate, endDate: d.endDate, dateMode: 'exact', tripNights: 2 }
-  })
-  const [currentQuery, setCurrentQuery] = useState('')
-  const [watchTarget, setWatchTarget] = useState<Campground | null>(null)
-  const [watchCount, setWatchCount] = useState(0)
-  const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({})
-  const [searchKey, setSearchKey] = useState(0)
-
-  // Client-side availability overrides (browser fetches rec.gov directly)
-  const [availOverrides, setAvailOverrides] = useState<Record<string, AvailOverride>>({})
-  const [availChecking, setAvailChecking] = useState(false)
-  const [availCheckTriggered, setAvailCheckTriggered] = useState(false)
-  const [availProgress, setAvailProgress] = useState({ done: 0, total: 0 })
-
-  // Dispersed state
-  const [dispersedSpots, setDispersedSpots] = useState<DispersedSpot[]>([])
-  const [publicLandPolygons, setPublicLandPolygons] = useState<PublicLandFeature[]>([])
-  const [selectedDispersedId, setSelectedDispersedId] = useState<string | null>(null)
-  const [searchLat, setSearchLat] = useState<number | null>(null)
-  const [searchLng, setSearchLng] = useState<number | null>(null)
-  const [searchRadius, setSearchRadius] = useState(50)
-  const [lastVehicleType, setLastVehicleType] = useState<'car' | 'awd' | '4wd'>('awd')
-
-  // Saved campgrounds for map layer
-  const [savedCampgrounds, setSavedCampgrounds] = useState<Campground[]>([])
+  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null)
+  const [bounds, setBounds] = useState<MapBounds | null>(null)
+  const [dates, setDates] = useState(nextWeekendDefaults)
+  const [query, setQuery] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saved, setSaved] = useState<SavedSite[]>([])
   const [showSaved, setShowSaved] = useState(true)
 
-  // Load saved campgrounds from localStorage
   useEffect(() => {
-    const items = getSaved()
-    setSavedCampgrounds(items.filter((i) => i.type === 'campground').map((i) => i.campground!))
+    loadCampgrounds().then(setCampgrounds).catch((e) => setLoadError(e.message))
+    listSaved().then(setSaved)
   }, [])
 
-  // Re-sync saved campgrounds when switching to/from Saved tab
-  useEffect(() => {
-    const items = getSaved()
-    setSavedCampgrounds(items.filter((i) => i.type === 'campground').map((i) => i.campground!))
-  }, [tab])
+  const savedIds = useMemo(() => new Set(saved.map((s) => s.id)), [saved])
+  const selected = useMemo(() => campgrounds.find((c) => c.id === selectedId) || null, [campgrounds, selectedId])
 
-  // Merge availability overrides into the campground list
-  const displayedCampgrounds = useMemo(() => {
-    if (Object.keys(availOverrides).length === 0) return campgrounds
-    return campgrounds.map((c) => {
-      const ov = availOverrides[c.id]
-      if (!ov) return c
-      return { ...c, availability: ov.status, availableSites: ov.availableSites, totalSites: ov.totalSites }
-    })
-  }, [campgrounds, availOverrides])
+  const inView = useCallback((c: Campground) => !bounds
+    || (c.lat >= bounds.south && c.lat <= bounds.north && c.lng >= bounds.west && c.lng <= bounds.east), [bounds])
 
-  // Explicit availability check — triggered by the user, not automatically
-  const handleCheckAvailability = useCallback(() => {
-    const recgovCamps = campgrounds.filter((c) => c.source === 'recgov')
-    if (recgovCamps.length === 0 || !currentDates.startDate || !currentDates.endDate) return
+  const toCheck = useMemo(
+    () => campgrounds.filter((c) => c.reserveType === 'reservable' && inView(c)).slice(0, 60),
+    [campgrounds, inView],
+  )
 
-    setAvailOverrides({})
-    setAvailChecking(true)
-    setAvailCheckTriggered(true)
-    setAvailProgress({ done: 0, total: recgovCamps.length })
-
-    const startDate = new Date(`${currentDates.startDate}T00:00:00Z`)
-    const endDate = new Date(`${currentDates.endDate}T00:00:00Z`)
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
-      setAvailChecking(false)
-      return
-    }
-
-    const isFlexible = currentDates.dateMode === 'flexible'
-    let pending = recgovCamps.length
-
-    recgovCamps.forEach((camp) => {
-      const check = isFlexible
-        ? checkFlexibleAvailability(camp.id, startDate, endDate, currentDates.tripNights)
-        : checkCampgroundAvailability(camp.id, startDate, endDate)
-
-      check
-        .then((result) => {
-          setAvailOverrides((prev) => ({ ...prev, [camp.id]: result }))
-        })
-        .catch(() => { /* stays unknown */ })
-        .finally(() => {
-          pending--
-          setAvailProgress((p) => ({ ...p, done: p.done + 1 }))
-          if (pending === 0) setAvailChecking(false)
-        })
-    })
-  }, [campgrounds, currentDates])
-
-  const handleSearch = useCallback(async (params: SearchParams) => {
-    setLoading(true)
-    setError(null)
-    setHasSearched(true)
-    setCampgrounds([])
-    setAvailOverrides({})
-    setAvailChecking(false)
-    setAvailCheckTriggered(false)
-    setAvailProgress({ done: 0, total: 0 })
-    setSelectedId(null)
-    setCurrentDates({
-      startDate: params.dateMode === 'flexible' ? (params.windowStart ?? '') : params.startDate,
-      endDate:   params.dateMode === 'flexible' ? (params.windowEnd   ?? '') : params.endDate,
-      dateMode: params.dateMode,
-      tripNights: params.tripNights ?? 2,
-    })
-    setCurrentQuery(params.query)
-    setSearchRadius(params.radiusMiles)
-    setDispersedSpots([])
-    setPublicLandPolygons([])
-    setSelectedDispersedId(null)
-    setLastVehicleType(params.vehicleType)
-    setSearchKey((k) => k + 1)
-
+  const onSearch = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!query.trim()) return
     try {
-      let lat: number, lng: number
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`)
+      if (!res.ok) return
+      const g = await res.json()
+      setCenter({ lat: g.lat, lng: g.lng })
+    } catch { /* ignore */ }
+  }, [query])
 
-      if (params.gpsLat != null && params.gpsLng != null) {
-        lat = params.gpsLat
-        lng = params.gpsLng
-      } else if (params.query.trim()) {
-        const geoRes = await fetch(`/api/geocode?q=${encodeURIComponent(params.query)}`)
-        if (!geoRes.ok) {
-          const err = await geoRes.json()
-          throw new Error(err.error || 'Could not find that location')
-        }
-        const geo = await geoRes.json()
-        lat = geo.lat
-        lng = geo.lng
-      } else {
-        // No text and no GPS — use current map viewport center
-        lat = mapViewCenter.lat
-        lng = mapViewCenter.lng
-      }
-
-      setMapCenter({ lat, lng })
-      setSearchLat(lat)
-      setSearchLng(lng)
-
-      const q = new URLSearchParams({
-        lat: lat.toString(),
-        lng: lng.toString(),
-        radius: params.radiusMiles.toString(),
-        startDate: params.startDate,
-        endDate: params.endDate,
-        sources: params.enabledSources.join(','),
-        vehicleType: params.vehicleType,
-        dateMode: params.dateMode,
-        amenities: params.amenities.join(','),
-      })
-      if (params.dateMode === 'flexible') {
-        if (params.windowStart) q.set('windowStart', params.windowStart)
-        if (params.windowEnd)   q.set('windowEnd',   params.windowEnd)
-        if (params.tripNights)  q.set('tripNights',  params.tripNights.toString())
-      }
-
-      const searchRes = await fetch(`/api/search?${q}`)
-      if (!searchRes.ok) {
-        const err = await searchRes.json()
-        throw new Error(err.error || 'Search failed')
-      }
-      const data = await searchRes.json()
-      setCampgrounds(data.campgrounds)
-      setSourceCounts(data.sources || {})
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
-    } finally {
-      setLoading(false)
-    }
-  }, [mapViewCenter])
-
-  // "Search this area" — called by the map when user clicks the viewport search button
-  const handleSearchArea = useCallback(async (lat: number, lng: number, radiusMiles: number) => {
-    setLoading(true)
-    setError(null)
-    setHasSearched(true)
-    setCampgrounds([])
-    setAvailOverrides({})
-    setAvailChecking(false)
-    setAvailCheckTriggered(false)
-    setAvailProgress({ done: 0, total: 0 })
-    setSelectedId(null)
-    setDispersedSpots([])
-    setPublicLandPolygons([])
-    setSelectedDispersedId(null)
-    setSearchRadius(radiusMiles)
-    setSearchKey((k) => k + 1)
-    setSearchLat(lat)
-    setSearchLng(lng)
-
-    // Keep existing dates / sources from current search state
-    const q = new URLSearchParams({
-      lat: lat.toString(),
-      lng: lng.toString(),
-      radius: radiusMiles.toString(),
-      startDate: currentDates.startDate,
-      endDate: currentDates.endDate,
-      sources: 'recgov,cpw,freecampsites,thedyrt,ioverlander',
-      vehicleType: lastVehicleType,
-      dateMode: currentDates.dateMode,
-      amenities: '',
+  const checkAvailability = useCallback(async () => {
+    const start = new Date(`${dates.start}T00:00:00Z`)
+    const end = new Date(`${dates.end}T00:00:00Z`)
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return
+    if (toCheck.length === 0) return
+    setChecking(true)
+    setProgress({ done: 0, total: toCheck.length })
+    await runWithLimit(toCheck, 6, async (c) => {
+      try {
+        const r = await checkCampgroundAvailability(c.id, start, end)
+        setCampgrounds((prev) => prev.map((x) => x.id === c.id
+          ? { ...x, availability: r.status, availableSites: r.availableSites, totalSites: r.totalSites } : x))
+      } catch { /* leave unknown */ }
+      finally { setProgress((p) => ({ ...p, done: p.done + 1 })) }
     })
+    setChecking(false)
+  }, [dates, toCheck])
 
-    try {
-      const searchRes = await fetch(`/api/search?${q}`)
-      if (!searchRes.ok) {
-        const err = await searchRes.json()
-        throw new Error(err.error || 'Search failed')
-      }
-      const data = await searchRes.json()
-      setCampgrounds(data.campgrounds)
-      setSourceCounts(data.sources || {})
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
-    } finally {
-      setLoading(false)
-    }
-  }, [currentDates, lastVehicleType])
-
-  const availableCount = displayedCampgrounds.filter(
-    (c) => c.availability === 'available' || c.availability === 'limited'
-  ).length
-
-  const hasRecgov = campgrounds.some((c) => c.source === 'recgov')
+  const toggleSave = useCallback(async (c: Campground) => {
+    if (savedIds.has(c.id)) await removeSaved(c.id)
+    else await saveCampground(c)
+    setSaved(await listSaved())
+  }, [savedIds])
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden">
+      <MapView
+        campgrounds={campgrounds}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        center={center}
+        savedSites={saved}
+        showSaved={showSaved}
+        onBoundsChange={setBounds}
+      />
 
-      {/* ── Sidebar ── */}
-      <aside
-        className={`flex-shrink-0 flex flex-col border-r border-stone-800 bg-stone-950 transition-all duration-200 overflow-hidden ${
-          sidebarOpen ? 'w-[380px]' : 'w-0 border-r-0'
-        }`}
-      >
-        {/* Brand + tabs */}
-        <header className="flex-shrink-0 bg-stone-900 border-b border-stone-800">
-          <div className="px-4 py-3 flex items-center gap-2.5">
-            <Icon name="tent" className="w-5 h-5 text-green-500 flex-shrink-0" />
-            <div className="min-w-0">
+      {/* ── Top-left: brand + search ── */}
+      <div className="absolute top-3 left-3 z-10 w-[330px] max-w-[calc(100vw-24px)]">
+        <div className="bg-stone-900/95 backdrop-blur rounded-2xl shadow-2xl border border-stone-700/50 overflow-hidden">
+          <div className="px-4 py-3 flex items-center gap-2.5 border-b border-stone-800">
+            <Icon name="tent" className="w-5 h-5 text-green-500" />
+            <div>
               <h1 className="text-sm font-bold text-white leading-tight">Colorado Camp Finder</h1>
-              <p className="text-[10px] text-stone-500">rec.gov · CO State Parks · Free Camping</p>
+              <p className="text-[10px] text-stone-500">{campgrounds.length} campgrounds · rec.gov + CO State Parks</p>
             </div>
           </div>
 
-          <div className="flex border-t border-stone-800">
-            {(
-              [
-                { id: 'search',    label: 'Search',    accent: 'border-green-500' },
-                { id: 'dispersed', label: 'Dispersed', accent: 'border-orange-500' },
-                { id: 'saved',     label: 'Saved',     accent: 'border-amber-500' },
-                { id: 'watches',   label: 'Watches',   accent: 'border-green-500' },
-              ] as { id: SidebarTab; label: string; accent: string }[]
-            ).map(({ id, label, accent }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={`flex-1 py-2 text-[11px] font-semibold transition-colors relative ${
-                  tab === id ? `text-white border-b-2 ${accent}` : 'text-stone-500 hover:text-stone-300'
-                }`}
-              >
-                {label}
-                {id === 'dispersed' && dispersedSpots.length > 0 && (
-                  <span className="ml-0.5 text-[9px] bg-orange-600/80 text-white px-1 py-0.5 rounded-full font-bold">
-                    {dispersedSpots.length}
-                  </span>
-                )}
-                {id === 'watches' && watchCount > 0 && (
-                  <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-green-600 text-[9px] text-white flex items-center justify-center font-bold">
-                    {watchCount}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        </header>
-
-        {/* Unified scrollable content */}
-        <div className="flex-1 overflow-y-auto">
-
-          {tab === 'search' && (
-            <>
-              <div className="px-4 py-4 border-b border-stone-800 bg-stone-900/40">
-                <SearchForm onSearch={handleSearch} loading={loading} />
-              </div>
-
-              {hasSearched && !loading && !error && campgrounds.length > 0 && (
-                <>
-                  <div className="px-4 py-2 bg-stone-900/30 border-b border-stone-800/50 flex items-center justify-between text-xs">
-                    <span className="text-stone-500">{campgrounds.length} campgrounds</span>
-                    <div className="flex items-center gap-3">
-                      {Object.entries(sourceCounts).filter(([, n]) => n > 0).map(([src, n]) => (
-                        <span key={src} className="text-[10px] text-stone-600">{src}: {n}</span>
-                      ))}
-                      {availChecking ? (
-                        <span className="text-[10px] text-stone-500 tabular-nums">
-                          {availProgress.done}/{availProgress.total} checked…
-                        </span>
-                      ) : availCheckTriggered ? (
-                        availableCount > 0 ? (
-                          <span className="text-green-400 font-semibold">{availableCount} open</span>
-                        ) : (
-                          <span className="text-red-400 text-[10px]">None available</span>
-                        )
-                      ) : hasRecgov && currentDates.startDate ? (
-                        <button
-                          onClick={handleCheckAvailability}
-                          className="text-[10px] bg-green-600/15 hover:bg-green-600/25 text-green-400 px-2 py-0.5 rounded-md font-semibold transition-colors border border-green-600/20"
-                        >
-                          Check availability
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {/* Slim progress bar while checking */}
-                  {availChecking && (
-                    <div className="h-0.5 bg-stone-800 overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-500 ease-out"
-                        style={{
-                          width: availProgress.total > 0
-                            ? `${Math.max(5, (availProgress.done / availProgress.total) * 100)}%`
-                            : '5%',
-                        }}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-
-              <CampgroundList
-                campgrounds={displayedCampgrounds}
-                loading={loading}
-                error={error}
-                hasSearched={hasSearched}
-                searchQuery={currentQuery}
-                startDate={currentDates.startDate}
-                endDate={currentDates.endDate}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onWatch={(c) => setWatchTarget(c)}
+          <form onSubmit={onSearch} className="p-3 space-y-2.5">
+            <div className="relative">
+              <Icon name="search" className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={query} onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search a town, park, or area…"
+                className="w-full bg-stone-800 text-stone-100 text-sm rounded-lg pl-9 pr-3 py-2 placeholder:text-stone-500 outline-none focus:ring-2 focus:ring-green-600/40"
               />
-            </>
-          )}
-
-          {tab === 'dispersed' && (
-            <DispersedPanel
-              searchLat={searchLat}
-              searchLng={searchLng}
-              searchRadius={searchRadius}
-              searchKey={searchKey}
-              vehicleType={lastVehicleType}
-              onPolygonsLoaded={setPublicLandPolygons}
-              onSpotsLoaded={setDispersedSpots}
-              selectedId={selectedDispersedId}
-              onSelect={(id) => {
-                setSelectedDispersedId(id)
-                const spot = dispersedSpots.find((s) => s.id === id)
-                if (spot) setMapCenter({ lat: spot.lat, lng: spot.lng })
-              }}
-            />
-          )}
-
-          {tab === 'saved' && <SavedPanel />}
-          {tab === 'watches' && <WatchesPanel key={watchCount} />}
+            </div>
+            <div className="flex gap-2">
+              <label className="flex-1 text-[10px] text-stone-500">
+                Check-in
+                <input type="date" value={dates.start} onChange={(e) => setDates((d) => ({ ...d, start: e.target.value }))}
+                  className="w-full mt-0.5 bg-stone-800 text-stone-100 text-xs rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-600/40" />
+              </label>
+              <label className="flex-1 text-[10px] text-stone-500">
+                Check-out
+                <input type="date" value={dates.end} onChange={(e) => setDates((d) => ({ ...d, end: e.target.value }))}
+                  className="w-full mt-0.5 bg-stone-800 text-stone-100 text-xs rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-600/40" />
+              </label>
+            </div>
+            <button
+              type="button" onClick={checkAvailability} disabled={checking || toCheck.length === 0}
+              className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 disabled:bg-stone-700 disabled:text-stone-500 text-white text-sm font-semibold rounded-lg py-2 transition-colors"
+            >
+              {checking
+                ? <>Checking {progress.done}/{progress.total}…</>
+                : <><Icon name="calendar" className="w-3.5 h-3.5" /> Check availability ({toCheck.length} in view)</>}
+            </button>
+          </form>
         </div>
-      </aside>
+        {loadError && <p className="mt-2 text-xs text-red-400 bg-stone-900/90 rounded-lg px-3 py-2">{loadError}</p>}
+      </div>
 
-      {/* ── Map ── */}
-      <main className="flex-1 relative overflow-hidden">
+      {/* ── Top-right cluster sits under map controls: saved toggle ── */}
+      <button
+        onClick={() => setShowSaved((s) => !s)}
+        title={showSaved ? 'Hide saved' : 'Show saved'}
+        className={`absolute top-3 right-[58px] z-10 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shadow-lg backdrop-blur border transition-colors ${
+          showSaved ? 'bg-amber-600/90 text-white border-amber-400/50' : 'bg-stone-900/90 text-stone-400 border-stone-700/50'
+        }`}
+      >
+        <Icon name={showSaved ? 'bookmarkFilled' : 'bookmark'} className="w-3.5 h-3.5" />
+        {saved.length}
+      </button>
 
-        <button
-          onClick={() => setSidebarOpen((o) => !o)}
-          title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-stone-800/90 hover:bg-stone-700 border-y border-r border-stone-600/60 rounded-r-lg text-stone-400 hover:text-white transition-colors shadow-lg"
-        >
-          <Icon name={sidebarOpen ? 'chevronLeft' : 'chevronRight'} className="w-3 h-3" />
-        </button>
+      {/* ── Legend ── */}
+      <div className="absolute bottom-8 right-3 z-10 bg-stone-900/90 backdrop-blur rounded-xl border border-stone-700/50 p-3 shadow-xl">
+        <div className="text-[10px] font-bold text-stone-500 uppercase tracking-widest mb-1.5">Availability</div>
+        {(['available', 'limited', 'full', 'first-come', 'unknown'] as PinStatus[]).map((s) => (
+          <div key={s} className="flex items-center gap-2 mb-1 last:mb-0">
+            <span className="w-3 h-3 rounded-full border border-white/40" style={{ background: STATUS_COLORS[s] }} />
+            <span className="text-[11px] text-stone-300">{STATUS_LABEL[s]}</span>
+          </div>
+        ))}
+      </div>
 
-        <CampgroundMap
-          campgrounds={displayedCampgrounds}
-          center={mapCenter}
-          selectedId={selectedId}
-          onSelect={(id) => { setSelectedId(id); setTab('search'); setSidebarOpen(true) }}
-          dispersedSpots={dispersedSpots}
-          publicLandPolygons={publicLandPolygons}
-          selectedDispersedId={selectedDispersedId}
-          onSelectDispersed={(id) => { setSelectedDispersedId(id); setTab('dispersed'); setSidebarOpen(true) }}
-          savedCampgrounds={showSaved ? savedCampgrounds : []}
-          showSaved={showSaved}
-          onToggleSaved={() => setShowSaved((s) => !s)}
-          onSearchArea={handleSearchArea}
-          onCenterChange={(lat, lng) => setMapViewCenter({ lat, lng })}
-          hasSearched={hasSearched}
-        />
-      </main>
-
-      {watchTarget && (
-        <WatchModal
-          campground={watchTarget}
-          startDate={currentDates.startDate}
-          endDate={currentDates.endDate}
-          onClose={() => setWatchTarget(null)}
-          onSaved={() => { setWatchTarget(null); setWatchCount((n) => n + 1); setTab('watches') }}
+      {/* ── Detail card ── */}
+      {selected && (
+        <DetailCard
+          c={selected}
+          isSaved={savedIds.has(selected.id)}
+          onClose={() => setSelectedId(null)}
+          onToggleSave={() => toggleSave(selected)}
         />
       )}
+    </div>
+  )
+}
+
+function DetailCard({ c, isSaved, onClose, onToggleSave }: {
+  c: Campground; isSaved: boolean; onClose: () => void; onToggleSave: () => void
+}) {
+  const status = pinStatus(c)
+  return (
+    <div className="absolute bottom-3 left-3 z-10 w-[340px] max-w-[calc(100vw-24px)] bg-stone-900/97 backdrop-blur rounded-2xl shadow-2xl border border-stone-700/50 overflow-hidden">
+      {c.photo && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={c.photo} alt={c.name} className="w-full h-32 object-cover" />
+      )}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h2 className="text-base font-bold text-white leading-tight">{c.name}</h2>
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-300 flex-shrink-0"><Icon name="x" className="w-4 h-4" /></button>
+        </div>
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold text-white"
+            style={{ background: STATUS_COLORS[status] }}>
+            {STATUS_LABEL[status]}{status !== 'first-come' && status !== 'unknown' ? ` · ${c.availableSites}/${c.totalSites}` : ''}
+          </span>
+          {c.campgroundType && <span className="text-[11px] text-stone-400">{c.campgroundType}</span>}
+        </div>
+
+        {c.amenities.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1">
+            {c.amenities.slice(0, 6).map((a) => (
+              <span key={a} className="text-[10px] text-stone-300 bg-stone-800 rounded px-1.5 py-0.5">{a}</span>
+            ))}
+          </div>
+        )}
+
+        {c.phone && <p className="mt-2.5 text-xs text-stone-400">{c.phone}</p>}
+
+        <div className="mt-3 flex gap-2">
+          <a href={c.reserveUrl} target="_blank" rel="noopener noreferrer"
+            className="flex-1 text-center bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-lg py-2 transition-colors">
+            Go to site →
+          </a>
+          <a href={c.directionsUrl} target="_blank" rel="noopener noreferrer"
+            title="Directions"
+            className="px-3 grid place-items-center bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors">
+            <Icon name="navigation" className="w-4 h-4" />
+          </a>
+          <button onClick={onToggleSave} title={isSaved ? 'Remove from saved' : 'Save'}
+            className={`px-3 grid place-items-center rounded-lg transition-colors ${
+              isSaved ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-stone-800 hover:bg-stone-700 text-stone-200'
+            }`}>
+            <Icon name={isSaved ? 'bookmarkFilled' : 'bookmark'} className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

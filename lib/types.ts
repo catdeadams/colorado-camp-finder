@@ -62,7 +62,12 @@ export interface Campground {
   amenities: string[]
   campgroundType?: string
   minVehicle?: 'car' | 'awd' | '4wd'  // minimum vehicle needed
+  photo?: string        // representative image URL (rec.gov MEDIA)
+  recAreaId?: string    // parent RecArea (for grouping / extra detail)
 }
+
+// Map pin color buckets. `first-come` is intentionally distinct from availability.
+export type PinStatus = 'available' | 'limited' | 'full' | 'first-come' | 'unknown'
 
 export interface GeocodedLocation {
   lat: number
