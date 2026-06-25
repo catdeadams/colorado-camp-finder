@@ -1,4 +1,5 @@
 import type { StyleSpecification } from 'maplibre-gl'
+import { layers, namedFlavor } from '@protomaps/basemaps'
 
 // Colorado bounds [west, south, east, north]
 export const CO_BOUNDS: [number, number, number, number] = [-109.06, 36.99, -102.04, 41.0]
@@ -23,6 +24,23 @@ export const TOPO_STYLE: StyleSpecification = {
     { id: 'bg', type: 'background', paint: { 'background-color': '#e8e3d8' } },
     { id: 'topo', type: 'raster', source: 'usgs-topo' },
   ],
+}
+
+// Offline-capable topo basemap: Protomaps vector tiles (from the bundled CO
+// PMTiles) + hillshade/dispersed layers added in MapView. Glyphs/sprites are
+// Protomaps-hosted for now (self-hosted in the offline pack later).
+const PM_ASSETS = 'https://protomaps.github.io/basemaps-assets'
+
+export function buildTopoStyle(pmtilesSourceUrl: string): StyleSpecification {
+  return {
+    version: 8,
+    glyphs: `${PM_ASSETS}/fonts/{fontstack}/{range}.pbf`,
+    sprite: `${PM_ASSETS}/sprites/v4/light`,
+    sources: {
+      protomaps: { type: 'vector', url: pmtilesSourceUrl, attribution: '© OpenStreetMap · Protomaps' },
+    },
+    layers: layers('protomaps', namedFlavor('light'), { lang: 'en' }) as StyleSpecification['layers'],
+  }
 }
 
 // Pin colors. `first-come` (blue) is intentionally distinct from availability.

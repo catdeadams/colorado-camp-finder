@@ -3,11 +3,14 @@
 import { useEffect, useRef } from 'react'
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { Protocol } from 'pmtiles'
 import type { FeatureCollection } from 'geojson'
-import { TOPO_STYLE, CO_CENTER } from '@/lib/basemap'
+import { buildTopoStyle, CO_CENTER } from '@/lib/basemap'
 import { loadPublicLand, loadMVUM } from '@/lib/dataset'
 import type { Campground, PinStatus } from '@/lib/types'
 import type { SavedSite } from '@/lib/store'
+
+let pmtilesRegistered = false
 
 export interface MapBounds { west: number; south: number; east: number; north: number }
 
@@ -81,9 +84,10 @@ export default function MapView({
   // ── init map ──
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
+    if (!pmtilesRegistered) { maplibregl.addProtocol('pmtiles', new Protocol().tile); pmtilesRegistered = true }
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: TOPO_STYLE,
+      style: buildTopoStyle(`pmtiles://${window.location.origin}/co-basemap.pmtiles`),
       center: CO_CENTER,
       zoom: 6.4,
       maxZoom: 16,
@@ -133,7 +137,9 @@ export default function MapView({
         },
       })
 
-      // ── dispersed-intel layers (below pins; hidden until toggled) ──
+      const labelLayerId = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
+
+      // ── dispersed-intel layers (below pins/labels; hidden until toggled) ──
       map.addSource('dem', {
         type: 'raster-dem',
         tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
@@ -142,7 +148,7 @@ export default function MapView({
       map.addLayer({
         id: 'hillshade', type: 'hillshade', source: 'dem', minzoom: 7, layout: { visibility: 'none' },
         paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#3a2f1d', 'hillshade-highlight-color': '#fff8e7' },
-      }, 'camp-circles')
+      }, labelLayerId)
       map.addSource('publicland', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addLayer({
         id: 'publicland-fill', type: 'fill', source: 'publicland', minzoom: 8, layout: { visibility: 'none' },
@@ -152,7 +158,7 @@ export default function MapView({
             'NPS', '#7e22ce', 'STA', '#0284c7', 'BOR', '#0d9488', 'USFW', '#be185d', '#6b7280'],
           'fill-opacity': 0.2,
         },
-      }, 'camp-circles')
+      }, labelLayerId)
       map.addLayer({
         id: 'publicland-outline', type: 'line', source: 'publicland', minzoom: 8, layout: { visibility: 'none' },
         paint: {
@@ -161,7 +167,7 @@ export default function MapView({
             'NPS', '#7e22ce', 'STA', '#0284c7', 'BOR', '#0d9488', 'USFW', '#be185d', '#6b7280'],
           'line-opacity': 0.45, 'line-width': 0.6,
         },
-      }, 'camp-circles')
+      }, labelLayerId)
       map.addSource('mvum', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addLayer({
         id: 'mvum-roads', type: 'line', source: 'mvum', minzoom: 8, layout: { visibility: 'none', 'line-cap': 'round' },
@@ -171,7 +177,7 @@ export default function MapView({
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 13, 2.2],
           'line-opacity': 0.8,
         },
-      }, 'camp-circles')
+      }, labelLayerId)
 
       map.on('click', 'camp-circles', (e) => {
         const f = e.features?.[0]
