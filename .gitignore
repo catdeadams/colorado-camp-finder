@@ -7,6 +7,10 @@ out/
 
 .vercel
 
+# Large generated basemap (host externally; regenerate via go-pmtiles) + tooling
+public/*.pmtiles
+tools/
+
 # Capacitor Android build artifacts
 android/.gradle/
 android/app/build/
