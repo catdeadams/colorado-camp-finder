@@ -88,6 +88,7 @@ export default function MapView({
       zoom: 6.4,
       maxZoom: 16,
       attributionControl: { compact: true },
+      preserveDrawingBuffer: true,
     })
     mapRef.current = map
     if (typeof window !== 'undefined') (window as unknown as { __campmap?: maplibregl.Map }).__campmap = map
@@ -275,5 +276,5 @@ export default function MapView({
     }
   }, [showPublicLand, showRoads, showHillshade])
 
-  return <div ref={containerRef} className="absolute inset-0" />
+  return <div ref={containerRef} className="h-full w-full" />
 }
