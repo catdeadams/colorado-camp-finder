@@ -231,15 +231,17 @@ export default function HomePage() {
               <LayerToggle label="Forest roads (MVUM)" color="#16a34a" checked={showRoads} onChange={() => setShowRoads((v) => !v)} />
               <LayerToggle label="Hillshade (terrain)" color="#a8a29e" checked={showHillshade} onChange={() => setShowHillshade((v) => !v)} />
               {showRoads && (
-                <div className="mt-1.5 text-[10px] text-stone-400 flex items-center gap-3">
-                  <span><span style={{ color: '#16a34a' }}>●</span> car</span>
-                  <span><span style={{ color: '#f59e0b' }}>●</span> high-clear</span>
-                  <span><span style={{ color: '#dc2626' }}>●</span> 4WD</span>
+                <div className="mt-1.5 text-[10px] text-stone-400 flex items-center gap-2.5 flex-wrap">
+                  <span className="text-stone-500">Road = terrain:</span>
+                  <span><span style={{ color: '#16a34a' }}>●</span> flat</span>
+                  <span><span style={{ color: '#84cc16' }}>●</span> gentle</span>
+                  <span><span style={{ color: '#f59e0b' }}>●</span> mod</span>
+                  <span><span style={{ color: '#dc2626' }}>●</span> steep</span>
                 </div>
               )}
               {(showPublicLand || showRoads || showHillshade) && (
                 <p className="mt-2 pt-2 border-t border-stone-700/60 text-[10px] text-stone-500 leading-snug">
-                  Roads open to vehicles ≈ legal dispersed corridors. Always verify legality, closures &amp; fire bans on-site.
+                  Greener roads = flatter ground (better for camping); tap a road for access &amp; slope. Roads ≈ legal dispersed corridors — still verify access, legality, closures &amp; fire bans on-site.
                 </p>
               )}
             </div>

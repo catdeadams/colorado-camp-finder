@@ -165,10 +165,8 @@ export default function MapView({
       map.addLayer({
         id: 'mvum-roads', type: 'line', source: 'mvum', minzoom: 8, layout: { visibility: 'none', 'line-cap': 'round' },
         paint: {
-          'line-color': ['case',
-            ['==', ['get', 'car'], 'open'], '#16a34a',
-            ['==', ['get', 'hc'], 'open'], '#f59e0b',
-            ['==', ['get', 'fourwd'], 'open'], '#dc2626', '#9ca3af'],
+          'line-color': ['match', ['get', 'flat'],
+            'flat', '#16a34a', 'gentle', '#84cc16', 'moderate', '#f59e0b', 'steep', '#dc2626', '#9ca3af'],
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 13, 2.2],
           'line-opacity': 0.8,
         },
@@ -185,6 +183,17 @@ export default function MapView({
         if (dropModeRef.current) { onMapPointRef.current?.(e.lngLat.lat, e.lngLat.lng); return }
         onSelectRef.current(null)
       })
+      map.on('click', 'mvum-roads', (e) => {
+        const p = (e.features?.[0]?.properties || {}) as Record<string, unknown>
+        const access = p.car === 'open' ? 'Cars OK' : p.hc === 'open' ? 'High-clearance' : p.fourwd === 'open' ? '4WD only' : 'Restricted'
+        const surface = String(p.surface || '').replace(/^[A-Z]+ - /, '')
+        new maplibregl.Popup({ offset: 6, closeButton: true, maxWidth: '230px' })
+          .setLngLat(e.lngLat)
+          .setHTML(`<div style="font-family:system-ui,sans-serif;font-size:12px;min-width:150px"><b>${p.name || 'Forest road'}</b><br>${access} · ${p.flat || '?'} terrain${p.slope != null ? ` (${p.slope}°)` : ''}<br><span style="color:#78716c;font-size:11px">${surface}${p.forest ? ' · ' + p.forest : ''}</span></div>`)
+          .addTo(map)
+      })
+      map.on('mouseenter', 'mvum-roads', () => { map.getCanvas().style.cursor = 'pointer' })
+      map.on('mouseleave', 'mvum-roads', () => { map.getCanvas().style.cursor = '' })
       map.on('moveend', emitBounds)
       readyRef.current = true
       emitBounds()
