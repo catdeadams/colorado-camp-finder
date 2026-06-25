@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import Icon from '@/components/Icon'
 import { loadCampgrounds } from '@/lib/dataset'
 import { checkCampgroundAvailability } from '@/lib/availabilityClient'
-import { listSaved, saveCampground, removeSaved, type SavedSite } from '@/lib/store'
+import { listSaved, saveCampground, saveCustomPin, removeSaved, exportSaved, importSaved, type SavedSite } from '@/lib/store'
 import { STATUS_COLORS } from '@/lib/basemap'
 import type { Campground, PinStatus } from '@/lib/types'
 import type { MapBounds } from '@/components/MapView'
@@ -56,6 +56,9 @@ export default function HomePage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saved, setSaved] = useState<SavedSite[]>([])
   const [showSaved, setShowSaved] = useState(true)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [dropMode, setDropMode] = useState(false)
+  const [pinDraft, setPinDraft] = useState<{ lat: number; lng: number } | null>(null)
 
   useEffect(() => {
     loadCampgrounds().then(setCampgrounds).catch((e) => setLoadError(e.message))
@@ -102,11 +105,35 @@ export default function HomePage() {
     setChecking(false)
   }, [dates, toCheck])
 
+  const refreshSaved = useCallback(async () => setSaved(await listSaved()), [])
+
   const toggleSave = useCallback(async (c: Campground) => {
     if (savedIds.has(c.id)) await removeSaved(c.id)
     else await saveCampground(c)
-    setSaved(await listSaved())
-  }, [savedIds])
+    await refreshSaved()
+  }, [savedIds, refreshSaved])
+
+  const onMapPoint = useCallback((lat: number, lng: number) => setPinDraft({ lat, lng }), [])
+
+  const savePin = useCallback(async (name: string) => {
+    if (!pinDraft) return
+    await saveCustomPin({ name: name.trim() || 'Dispersed campsite', lat: pinDraft.lat, lng: pinDraft.lng })
+    setPinDraft(null); setDropMode(false)
+    await refreshSaved()
+  }, [pinDraft, refreshSaved])
+
+  const removeSavedItem = useCallback(async (id: string) => { await removeSaved(id); await refreshSaved() }, [refreshSaved])
+
+  const doExport = useCallback(async () => {
+    const blob = new Blob([await exportSaved()], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'colorado-camp-saved.json'; a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  const doImport = useCallback(async (file: File) => {
+    try { await importSaved(await file.text()); await refreshSaved() } catch { /* ignore bad file */ }
+  }, [refreshSaved])
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -118,7 +145,17 @@ export default function HomePage() {
         savedSites={saved}
         showSaved={showSaved}
         onBoundsChange={setBounds}
+        dropMode={dropMode}
+        onMapPoint={onMapPoint}
       />
+
+      {dropMode && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-orange-600 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-2xl">
+          <Icon name="mapPin" className="w-3.5 h-3.5" />
+          Tap the map to place your dispersed campsite
+          <button onClick={() => setDropMode(false)} className="underline opacity-90 hover:opacity-100">cancel</button>
+        </div>
+      )}
 
       {/* ── Top-left: brand + search ── */}
       <div className="absolute top-3 left-3 z-10 w-[330px] max-w-[calc(100vw-24px)]">
@@ -161,19 +198,30 @@ export default function HomePage() {
                 : <><Icon name="calendar" className="w-3.5 h-3.5" /> Check availability ({toCheck.length} in view)</>}
             </button>
           </form>
+          <div className="px-3 pb-3">
+            <button
+              onClick={() => { setDropMode((d) => !d); setPanelOpen(false) }}
+              className={`w-full flex items-center justify-center gap-2 text-sm font-semibold rounded-lg py-2 transition-colors border ${
+                dropMode ? 'bg-orange-600 text-white border-orange-400' : 'bg-stone-800 hover:bg-stone-700 text-orange-300 border-stone-700'
+              }`}
+            >
+              <Icon name="mapPin" className="w-3.5 h-3.5" />
+              {dropMode ? 'Tap the map to place…' : 'Drop a dispersed pin'}
+            </button>
+          </div>
         </div>
         {loadError && <p className="mt-2 text-xs text-red-400 bg-stone-900/90 rounded-lg px-3 py-2">{loadError}</p>}
       </div>
 
       {/* ── Top-right cluster sits under map controls: saved toggle ── */}
       <button
-        onClick={() => setShowSaved((s) => !s)}
-        title={showSaved ? 'Hide saved' : 'Show saved'}
+        onClick={() => setPanelOpen((o) => !o)}
+        title="Saved sites"
         className={`absolute top-3 right-[58px] z-10 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shadow-lg backdrop-blur border transition-colors ${
-          showSaved ? 'bg-amber-600/90 text-white border-amber-400/50' : 'bg-stone-900/90 text-stone-400 border-stone-700/50'
+          panelOpen ? 'bg-amber-600/90 text-white border-amber-400/50' : 'bg-stone-900/90 text-stone-300 border-stone-700/50'
         }`}
       >
-        <Icon name={showSaved ? 'bookmarkFilled' : 'bookmark'} className="w-3.5 h-3.5" />
+        <Icon name="bookmarkFilled" className="w-3.5 h-3.5" />
         {saved.length}
       </button>
 
@@ -197,6 +245,21 @@ export default function HomePage() {
           onToggleSave={() => toggleSave(selected)}
         />
       )}
+
+      {panelOpen && (
+        <SavedPanel
+          saved={saved}
+          showSaved={showSaved}
+          onToggleShow={() => setShowSaved((s) => !s)}
+          onClose={() => setPanelOpen(false)}
+          onFly={(s) => { setCenter({ lat: s.lat, lng: s.lng }); setPanelOpen(false) }}
+          onRemove={removeSavedItem}
+          onExport={doExport}
+          onImport={doImport}
+        />
+      )}
+
+      {pinDraft && <PinModal onCancel={() => setPinDraft(null)} onSave={savePin} />}
     </div>
   )
 }
@@ -250,6 +313,69 @@ function DetailCard({ c, isSaved, onClose, onToggleSave }: {
             }`}>
             <Icon name={isSaved ? 'bookmarkFilled' : 'bookmark'} className="w-4 h-4" />
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SavedPanel({ saved, showSaved, onToggleShow, onClose, onFly, onRemove, onExport, onImport }: {
+  saved: SavedSite[]; showSaved: boolean; onToggleShow: () => void; onClose: () => void
+  onFly: (s: SavedSite) => void; onRemove: (id: string) => void; onExport: () => void; onImport: (f: File) => void
+}) {
+  return (
+    <div className="absolute top-14 right-3 z-20 w-[320px] max-w-[calc(100vw-24px)] bg-stone-900/97 backdrop-blur rounded-2xl shadow-2xl border border-stone-700/50 overflow-hidden flex flex-col max-h-[70vh]">
+      <div className="px-4 py-3 flex items-center justify-between border-b border-stone-800">
+        <h2 className="text-sm font-bold text-white flex items-center gap-2"><Icon name="bookmarkFilled" className="w-4 h-4 text-amber-500" /> Saved ({saved.length})</h2>
+        <button onClick={onClose} className="text-stone-500 hover:text-stone-300"><Icon name="x" className="w-4 h-4" /></button>
+      </div>
+      <div className="px-4 py-2 flex items-center justify-between border-b border-stone-800/60">
+        <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer">
+          <input type="checkbox" checked={showSaved} onChange={onToggleShow} className="accent-amber-500" />
+          Show on map
+        </label>
+        <div className="flex gap-2">
+          <button onClick={onExport} className="text-[11px] text-stone-300 hover:text-white bg-stone-800 rounded px-2 py-1">Export</button>
+          <label className="text-[11px] text-stone-300 hover:text-white bg-stone-800 rounded px-2 py-1 cursor-pointer">
+            Import
+            <input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && onImport(e.target.files[0])} />
+          </label>
+        </div>
+      </div>
+      <div className="overflow-y-auto">
+        {saved.length === 0 ? (
+          <p className="text-xs text-stone-500 px-4 py-6 text-center">No saved sites yet. Save a campground, or drop a dispersed pin.</p>
+        ) : saved.map((s) => (
+          <div key={s.id} className="px-4 py-2.5 border-b border-stone-800/40 flex items-center gap-2.5 hover:bg-stone-800/40">
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.kind === 'dispersed' ? 'bg-orange-500' : 'bg-amber-500'}`} />
+            <button onClick={() => onFly(s)} className="flex-1 text-left min-w-0">
+              <div className="text-sm text-stone-100 truncate">{s.name}</div>
+              <div className="text-[10px] text-stone-500">{s.kind === 'dispersed' ? 'Dispersed pin' : 'Campground'}{s.note ? ` · ${s.note}` : ''}</div>
+            </button>
+            <button onClick={() => onRemove(s.id)} title="Remove" className="text-stone-600 hover:text-red-400 flex-shrink-0"><Icon name="x" className="w-3.5 h-3.5" /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PinModal({ onCancel, onSave }: { onCancel: () => void; onSave: (name: string) => void }) {
+  const [name, setName] = useState('')
+  return (
+    <div className="absolute inset-0 z-40 grid place-items-center bg-black/40 p-4" onClick={onCancel}>
+      <div className="w-[320px] max-w-full bg-stone-900 rounded-2xl shadow-2xl border border-stone-700 p-4" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-1"><Icon name="mapPin" className="w-4 h-4 text-orange-500" /> Name this dispersed site</h2>
+        <p className="text-[11px] text-stone-500 mb-3">Saved on your device and shown on the map.</p>
+        <input
+          autoFocus value={name} onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onSave(name) }}
+          placeholder="e.g. Aspen pullout off CR-7"
+          className="w-full bg-stone-800 text-stone-100 text-sm rounded-lg px-3 py-2 placeholder:text-stone-500 outline-none focus:ring-2 focus:ring-orange-600/40"
+        />
+        <div className="mt-3 flex gap-2 justify-end">
+          <button onClick={onCancel} className="text-sm text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
+          <button onClick={() => onSave(name)} className="bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold rounded-lg px-4 py-2">Save pin</button>
         </div>
       </div>
     </div>

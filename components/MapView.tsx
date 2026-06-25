@@ -18,6 +18,8 @@ interface Props {
   savedSites?: SavedSite[]
   showSaved?: boolean
   onBoundsChange?: (b: MapBounds) => void
+  dropMode?: boolean
+  onMapPoint?: (lat: number, lng: number) => void
 }
 
 function statusOf(c: Campground): PinStatus {
@@ -55,6 +57,7 @@ function savedFC(sites: SavedSite[]): FeatureCollection {
 
 export default function MapView({
   campgrounds, selectedId, onSelect, center, savedSites = [], showSaved = true, onBoundsChange,
+  dropMode = false, onMapPoint,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -62,8 +65,12 @@ export default function MapView({
   const onSelectRef = useRef(onSelect)
   const onBoundsRef = useRef(onBoundsChange)
   const prevSelected = useRef<string | null>(null)
+  const onMapPointRef = useRef(onMapPoint)
+  const dropModeRef = useRef(dropMode)
   useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
   useEffect(() => { onBoundsRef.current = onBoundsChange }, [onBoundsChange])
+  useEffect(() => { onMapPointRef.current = onMapPoint }, [onMapPoint])
+  useEffect(() => { dropModeRef.current = dropMode }, [dropMode])
 
   // ── init map ──
   useEffect(() => {
@@ -112,9 +119,9 @@ export default function MapView({
         layout: { visibility: showSaved ? 'visible' : 'none' },
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 6, 10, 9, 14, 12],
-          'circle-color': '#d97706',
+          'circle-color': ['match', ['get', 'kind'], 'dispersed', '#ea580c', '#d97706'],
           'circle-stroke-width': 2.5,
-          'circle-stroke-color': '#fde68a',
+          'circle-stroke-color': ['match', ['get', 'kind'], 'dispersed', '#fed7aa', '#fde68a'],
           'circle-opacity': 0.9,
         },
       })
@@ -126,9 +133,9 @@ export default function MapView({
       map.on('mouseenter', 'camp-circles', () => { map.getCanvas().style.cursor = 'pointer' })
       map.on('mouseleave', 'camp-circles', () => { map.getCanvas().style.cursor = '' })
       map.on('click', (e) => {
-        if (map.queryRenderedFeatures(e.point, { layers: ['camp-circles'] }).length === 0) {
-          onSelectRef.current(null)
-        }
+        if (map.queryRenderedFeatures(e.point, { layers: ['camp-circles'] }).length) return
+        if (dropModeRef.current) { onMapPointRef.current?.(e.lngLat.lat, e.lngLat.lng); return }
+        onSelectRef.current(null)
       })
       map.on('moveend', emitBounds)
       readyRef.current = true
@@ -177,6 +184,13 @@ export default function MapView({
     if (!map || !center) return
     map.flyTo({ center: [center.lng, center.lat], zoom: 10, duration: 1200, essential: true })
   }, [center])
+
+  // ── drop-pin cursor ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !readyRef.current) return
+    map.getCanvas().style.cursor = dropMode ? 'crosshair' : ''
+  }, [dropMode])
 
   return <div ref={containerRef} className="absolute inset-0" />
 }
