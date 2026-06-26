@@ -10,7 +10,7 @@ const TILES = `tiles-${VERSION}`
 const PMTILES = `pmtiles-${VERSION}`
 const PMTILES_PATH = '/co-basemap.pmtiles'
 
-const DATA_FILES = ['/data/co-campgrounds.json', '/data/co-public-land.geojson', '/data/co-mvum-roads.geojson']
+const DATA_FILES = ['/data/co-campgrounds.json', '/data/co-cpw-parks.json', '/data/co-public-land.geojson', '/data/co-mvum-roads.geojson']
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil((async () => {

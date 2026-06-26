@@ -19,14 +19,47 @@ export interface RawCampground {
 
 let cache: Campground[] | null = null
 
-/** Load the bundled Colorado campground dataset (instant, offline-capable). */
+/** Load the bundled Colorado campground dataset: rec.gov + CO State Parks (instant, offline-capable). */
 export async function loadCampgrounds(): Promise<Campground[]> {
   if (cache) return cache
-  const res = await fetch('/data/co-campgrounds.json')
-  if (!res.ok) throw new Error('Failed to load campground dataset')
-  const data = (await res.json()) as { campgrounds: RawCampground[] }
-  cache = data.campgrounds.map(toCampground)
+  const [recRes, cpw] = await Promise.all([fetch('/data/co-campgrounds.json'), loadCpwParks()])
+  if (!recRes.ok) throw new Error('Failed to load campground dataset')
+  const data = (await recRes.json()) as { campgrounds: RawCampground[] }
+  cache = [...data.campgrounds.map(toCampground), ...cpw]
   return cache
+}
+
+interface RawCpwPark { name: string; lat: number; lng: number; reserveUrl: string; slugValid: boolean }
+
+async function loadCpwParks(): Promise<Campground[]> {
+  try {
+    const res = await fetch('/data/co-cpw-parks.json')
+    if (!res.ok) return []
+    const data = (await res.json()) as { parks: RawCpwPark[] }
+    return data.parks.map(toCpwCampground)
+  } catch {
+    return []
+  }
+}
+
+function toCpwCampground(p: RawCpwPark): Campground {
+  return {
+    id: `cpw-${p.lat.toFixed(4)}-${p.lng.toFixed(4)}`,
+    name: p.name,
+    description: 'Colorado State Park',
+    lat: p.lat,
+    lng: p.lng,
+    source: 'cpw',
+    reserveType: 'reservable', // reservable, but live availability isn't checked yet
+    distance: 0,
+    availability: 'unknown',
+    availableSites: 0,
+    totalSites: 0,
+    reserveUrl: p.reserveUrl,
+    directionsUrl: `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`,
+    amenities: [],
+    campgroundType: 'Colorado State Park',
+  }
 }
 
 function toCampground(r: RawCampground): Campground {
