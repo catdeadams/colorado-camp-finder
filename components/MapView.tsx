@@ -6,7 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
 import mlcontour from 'maplibre-contour'
 import type { FeatureCollection } from 'geojson'
-import { buildTopoStyle, CO_CENTER } from '@/lib/basemap'
+import { buildTopoStyle, getBasemapUrl, CO_CENTER } from '@/lib/basemap'
 import { loadPublicLand, loadMVUM } from '@/lib/dataset'
 import type { Campground, PinStatus } from '@/lib/types'
 import type { SavedSite } from '@/lib/store'
@@ -100,7 +100,7 @@ export default function MapView({
     ensureDemSource()
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: buildTopoStyle(`pmtiles://${window.location.origin}/co-basemap.pmtiles`),
+      style: buildTopoStyle(`pmtiles://${getBasemapUrl()}`),
       center: CO_CENTER,
       zoom: 6.4,
       maxZoom: 16,

@@ -3,7 +3,7 @@
 // basemap so the map works with no signal. The 112MB PMTiles file is served
 // via byte-range slicing from a single cached copy (after "Download Colorado").
 
-const VERSION = 'v2'
+const VERSION = 'v3'
 const SHELL = `shell-${VERSION}`
 const DATA = `data-${VERSION}`
 const TILES = `tiles-${VERSION}`
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (e) => {
   // Never intercept dynamic APIs or dev HMR — let them hit the network.
   if (url.origin === self.location.origin && (url.pathname.startsWith('/api/') || url.pathname.includes('hot-update') || url.pathname.includes('webpack-hmr'))) return
 
-  if (url.pathname === PMTILES_PATH) { e.respondWith(handlePmtiles(req)); return }
+  if (url.pathname.endsWith('/co-basemap.pmtiles')) { e.respondWith(handlePmtiles(req)); return }
   if (url.pathname.startsWith('/data/')) { e.respondWith(cacheFirst(req, DATA)); return }
   if (isTerrain(url)) { e.respondWith(cacheFirst(req, TILES)); return }
   if (isMapAsset(url)) { e.respondWith(cacheFirst(req, SHELL)); return }
@@ -68,7 +68,7 @@ async function handlePmtiles(req) {
   const range = req.headers.get('range')
   if (!pmtilesBlob) {
     const cache = await caches.open(PMTILES)
-    const full = await cache.match(new Request(PMTILES_PATH))
+    const full = await cache.match(req.url)
     if (!full) return fetch(req)   // not downloaded yet → normal online range request
     pmtilesBlob = await full.blob()
   }
@@ -90,10 +90,10 @@ async function handlePmtiles(req) {
 
 // "Download Colorado" — pre-cache the data pack + the full basemap for offline.
 self.addEventListener('message', (e) => {
-  if (e.data?.type === 'DOWNLOAD_PACK') e.waitUntil(downloadPack())
+  if (e.data?.type === 'DOWNLOAD_PACK') e.waitUntil(downloadPack(e.data.url || PMTILES_PATH))
 })
 
-async function downloadPack() {
+async function downloadPack(basemapUrl) {
   const post = async (msg) => (await self.clients.matchAll()).forEach((c) => c.postMessage(msg))
   try {
     const dataCache = await caches.open(DATA)
@@ -101,7 +101,7 @@ async function downloadPack() {
     await post({ type: 'PACK_PROGRESS', pct: 10, label: 'Camping data saved' })
 
     // Stream the basemap so we can report progress on the big download.
-    const res = await fetch(PMTILES_PATH)
+    const res = await fetch(basemapUrl)
     const total = Number(res.headers.get('content-length')) || 117_000_000
     const reader = res.body.getReader()
     const chunks = []
@@ -115,7 +115,7 @@ async function downloadPack() {
     }
     const blob = new Blob(chunks, { type: 'application/octet-stream' })
     const pmCache = await caches.open(PMTILES)
-    await pmCache.put(new Request(PMTILES_PATH), new Response(blob, { status: 200, headers: { 'Content-Length': String(blob.size), 'Accept-Ranges': 'bytes' } }))
+    await pmCache.put(new Request(basemapUrl), new Response(blob, { status: 200, headers: { 'Content-Length': String(blob.size), 'Accept-Ranges': 'bytes' } }))
     pmtilesBlob = blob
     await post({ type: 'PACK_DONE', pct: 100 })
   } catch (err) {
@@ -127,6 +127,6 @@ async function downloadPack() {
 self.addEventListener('message', async (e) => {
   if (e.data?.type !== 'PACK_STATUS') return
   const pmCache = await caches.open(PMTILES)
-  const has = await pmCache.match(new Request(PMTILES_PATH))
+  const has = await pmCache.match(e.data.url || PMTILES_PATH)
   ;(await self.clients.matchAll()).forEach((c) => c.postMessage({ type: 'PACK_STATUS', downloaded: !!has }))
 })

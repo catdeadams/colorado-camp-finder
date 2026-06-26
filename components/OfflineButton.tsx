@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Icon from './Icon'
+import { getBasemapUrl } from '@/lib/basemap'
 
 type State = 'idle' | 'downloading' | 'ready'
 
@@ -20,12 +21,12 @@ export default function OfflineButton() {
       else if (d?.type === 'PACK_ERROR') { setState('idle'); setLabel('Download failed — try again') }
     }
     navigator.serviceWorker.addEventListener('message', onMsg)
-    navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'PACK_STATUS' }))
+    navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'PACK_STATUS', url: getBasemapUrl() }))
     return () => navigator.serviceWorker.removeEventListener('message', onMsg)
   }, [])
 
   const download = () => {
-    navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'DOWNLOAD_PACK' }))
+    navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'DOWNLOAD_PACK', url: getBasemapUrl() }))
     setState('downloading'); setPct(0); setLabel('Starting…')
   }
 

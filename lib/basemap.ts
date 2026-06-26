@@ -43,6 +43,13 @@ export function buildTopoStyle(pmtilesSourceUrl: string): StyleSpecification {
   }
 }
 
+/** Basemap PMTiles URL: env override (R2 in production) or the bundled file (local dev). */
+export function getBasemapUrl(): string {
+  const env = process.env.NEXT_PUBLIC_BASEMAP_URL
+  if (env) return env
+  return typeof window !== 'undefined' ? `${window.location.origin}/co-basemap.pmtiles` : '/co-basemap.pmtiles'
+}
+
 // Pin colors. `first-come` (blue) is intentionally distinct from availability.
 export const STATUS_COLORS: Record<string, string> = {
   available: '#22c55e',
