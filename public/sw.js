@@ -18,6 +18,8 @@ self.addEventListener('activate', (e) => e.waitUntil((async () => {
   const keys = await caches.keys()
   await Promise.all(keys.filter((k) => !k.endsWith(VERSION)).map((k) => caches.delete(k)))
   await self.clients.claim()
+  const pm = await caches.open(PMTILES)
+  pmtilesDownloaded = (await pm.keys()).length > 0
 })()))
 
 const isTerrain = (u) => u.hostname === 's3.amazonaws.com' && u.pathname.includes('/terrarium/')
@@ -32,7 +34,10 @@ self.addEventListener('fetch', (e) => {
   // Never intercept dynamic APIs or dev HMR — let them hit the network.
   if (url.origin === self.location.origin && (url.pathname.startsWith('/api/') || url.pathname.includes('hot-update') || url.pathname.includes('webpack-hmr'))) return
 
-  if (url.pathname.endsWith('/co-basemap.pmtiles')) { e.respondWith(handlePmtiles(req)); return }
+  // Only intercept the basemap once it's been downloaded for offline; otherwise
+  // let the browser fetch it natively (intercepting cross-origin range requests
+  // can stall the pmtiles reader).
+  if (url.pathname.endsWith('/co-basemap.pmtiles') && pmtilesDownloaded) { e.respondWith(handlePmtiles(req)); return }
   if (url.pathname.startsWith('/data/')) { e.respondWith(cacheFirst(req, DATA)); return }
   if (isTerrain(url)) { e.respondWith(cacheFirst(req, TILES)); return }
   if (isMapAsset(url)) { e.respondWith(cacheFirst(req, SHELL)); return }
@@ -64,6 +69,7 @@ async function staleWhileRevalidate(req, cacheName) {
 // Hold the full basemap blob once (browser keeps large blobs disk-backed); serve
 // cheap byte-range views from it so panning offline doesn't reload 112MB per tile.
 let pmtilesBlob = null
+let pmtilesDownloaded = false
 async function handlePmtiles(req) {
   const range = req.headers.get('range')
   if (!pmtilesBlob) {
@@ -117,6 +123,7 @@ async function downloadPack(basemapUrl) {
     const pmCache = await caches.open(PMTILES)
     await pmCache.put(new Request(basemapUrl), new Response(blob, { status: 200, headers: { 'Content-Length': String(blob.size), 'Accept-Ranges': 'bytes' } }))
     pmtilesBlob = blob
+    pmtilesDownloaded = true
     await post({ type: 'PACK_DONE', pct: 100 })
   } catch (err) {
     await post({ type: 'PACK_ERROR', error: String(err) })
@@ -128,5 +135,6 @@ self.addEventListener('message', async (e) => {
   if (e.data?.type !== 'PACK_STATUS') return
   const pmCache = await caches.open(PMTILES)
   const has = await pmCache.match(e.data.url || PMTILES_PATH)
+  pmtilesDownloaded = !!has
   ;(await self.clients.matchAll()).forEach((c) => c.postMessage({ type: 'PACK_STATUS', downloaded: !!has }))
 })
