@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import Icon from '@/components/Icon'
+import OfflineButton from '@/components/OfflineButton'
 import { loadCampgrounds } from '@/lib/dataset'
 import { checkCampgroundAvailability } from '@/lib/availabilityClient'
 import { listSaved, saveCampground, saveCustomPin, removeSaved, exportSaved, importSaved, type SavedSite } from '@/lib/store'
@@ -247,6 +248,7 @@ export default function HomePage() {
             </div>
           )}
         </div>
+        <OfflineButton />
       </div>
 
       {/* ── Top-right cluster sits under map controls: saved toggle ── */}
