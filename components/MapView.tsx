@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
+import mlcontour from 'maplibre-contour'
 import type { FeatureCollection } from 'geojson'
 import { buildTopoStyle, CO_CENTER } from '@/lib/basemap'
 import { loadPublicLand, loadMVUM } from '@/lib/dataset'
@@ -11,6 +12,16 @@ import type { Campground, PinStatus } from '@/lib/types'
 import type { SavedSite } from '@/lib/store'
 
 let pmtilesRegistered = false
+let demSource: InstanceType<typeof mlcontour.DemSource> | null = null
+function ensureDemSource() {
+  if (demSource) return demSource
+  demSource = new mlcontour.DemSource({
+    url: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
+    encoding: 'terrarium', maxzoom: 13, worker: true,
+  })
+  demSource.setupMaplibre(maplibregl)
+  return demSource
+}
 
 export interface MapBounds { west: number; south: number; east: number; north: number }
 
@@ -76,6 +87,7 @@ export default function MapView({
   const onMapPointRef = useRef(onMapPoint)
   const dropModeRef = useRef(dropMode)
   const dataLoadedRef = useRef({ publicLand: false, roads: false })
+  const [mapReady, setMapReady] = useState(false)
   useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
   useEffect(() => { onBoundsRef.current = onBoundsChange }, [onBoundsChange])
   useEffect(() => { onMapPointRef.current = onMapPoint }, [onMapPoint])
@@ -85,6 +97,7 @@ export default function MapView({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
     if (!pmtilesRegistered) { maplibregl.addProtocol('pmtiles', new Protocol().tile); pmtilesRegistered = true }
+    ensureDemSource()
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: buildTopoStyle(`pmtiles://${window.location.origin}/co-basemap.pmtiles`),
@@ -179,6 +192,24 @@ export default function MapView({
         },
       }, labelLayerId)
 
+      // ── contour lines (topo) generated from the terrain DEM, below labels ──
+      map.addSource('contour-src', {
+        type: 'vector',
+        tiles: [demSource!.contourProtocolUrl({
+          thresholds: { 10: [500, 2500], 11: [200, 1000], 12: [100, 500], 13: [50, 250], 14: [50, 250], 15: [25, 100] },
+          contourLayer: 'contours', elevationKey: 'ele', levelKey: 'level',
+        })],
+        maxzoom: 15,
+      })
+      map.addLayer({
+        id: 'contour-lines', type: 'line', source: 'contour-src', 'source-layer': 'contours', minzoom: 10,
+        paint: {
+          'line-color': '#9c6b3f',
+          'line-width': ['match', ['get', 'level'], 1, 1.1, 0.5],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0.15, 12, 0.4],
+        },
+      }, labelLayerId)
+
       map.on('click', 'camp-circles', (e) => {
         const f = e.features?.[0]
         if (f) onSelectRef.current(String(f.properties?.id))
@@ -203,6 +234,7 @@ export default function MapView({
       map.on('mouseleave', 'mvum-roads', () => { map.getCanvas().style.cursor = '' })
       map.on('moveend', emitBounds)
       readyRef.current = true
+      setMapReady(true)
       emitBounds()
     })
 
@@ -280,7 +312,7 @@ export default function MapView({
         .then((d) => { (map.getSource('mvum') as GeoJSONSource | undefined)?.setData(d) })
         .catch(() => { dataLoadedRef.current.roads = false })
     }
-  }, [showPublicLand, showRoads, showHillshade])
+  }, [showPublicLand, showRoads, showHillshade, mapReady])
 
   return <div ref={containerRef} className="h-full w-full" />
 }

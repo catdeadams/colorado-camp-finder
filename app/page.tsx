@@ -62,7 +62,7 @@ export default function HomePage() {
   const [layersOpen, setLayersOpen] = useState(false)
   const [showPublicLand, setShowPublicLand] = useState(false)
   const [showRoads, setShowRoads] = useState(false)
-  const [showHillshade, setShowHillshade] = useState(false)
+  const [showHillshade, setShowHillshade] = useState(true)
 
   useEffect(() => {
     loadCampgrounds().then(setCampgrounds).catch((e) => setLoadError(e.message))
