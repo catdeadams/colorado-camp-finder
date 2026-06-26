@@ -264,7 +264,7 @@ export default function HomePage() {
       </button>
 
       {/* ── Legend ── */}
-      <div className="absolute bottom-8 right-3 z-10 bg-stone-900/90 backdrop-blur rounded-xl border border-stone-700/50 p-3 shadow-xl">
+      <div className="hidden sm:block absolute bottom-8 right-3 z-10 bg-stone-900/90 backdrop-blur rounded-xl border border-stone-700/50 p-3 shadow-xl">
         <div className="text-[10px] font-bold text-stone-500 uppercase tracking-widest mb-1.5">Availability</div>
         {(['available', 'limited', 'full', 'first-come', 'unknown'] as PinStatus[]).map((s) => (
           <div key={s} className="flex items-center gap-2 mb-1 last:mb-0">
@@ -312,7 +312,7 @@ function DetailCard({ c, isSaved, onClose, onToggleSave }: {
   const status = pinStatus(c)
   const isCpw = c.source === 'cpw'
   return (
-    <div className="absolute bottom-3 left-3 z-10 w-[340px] max-w-[calc(100vw-24px)] bg-stone-900/97 backdrop-blur rounded-2xl shadow-2xl border border-stone-700/50 overflow-hidden">
+    <div className="absolute bottom-0 left-0 right-0 z-20 max-w-full sm:bottom-3 sm:left-3 sm:right-auto sm:w-[340px] sm:max-w-[calc(100vw-24px)] bg-stone-900/97 backdrop-blur rounded-t-2xl sm:rounded-2xl shadow-2xl border border-stone-700/50 overflow-hidden">
       {c.photo && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={c.photo} alt={c.name} className="w-full h-32 object-cover" />

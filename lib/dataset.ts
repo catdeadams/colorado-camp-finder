@@ -25,8 +25,25 @@ export async function loadCampgrounds(): Promise<Campground[]> {
   const [recRes, cpw] = await Promise.all([fetch('/data/co-campgrounds.json'), loadCpwParks()])
   if (!recRes.ok) throw new Error('Failed to load campground dataset')
   const data = (await recRes.json()) as { campgrounds: RawCampground[] }
-  cache = [...data.campgrounds.map(toCampground), ...cpw]
+  const recgov = data.campgrounds.map(toCampground)
+  // Some CO state parks are also listed in rec.gov (often as first-come). They
+  // reserve via cpwshop, so drop the rec.gov duplicate and keep the CPW entry.
+  const norm = (s: string) => s.toLowerCase().replace(/\b(state park|recreation area|campground|sp|cg)\b/g, '').replace(/[^a-z0-9]/g, '')
+  const cpwByKey = new Map(cpw.map((c) => [norm(c.name), c] as const))
+  const recDeduped = recgov.filter((r) => {
+    const match = cpwByKey.get(norm(r.name))
+    return !(match && haversineMi(r.lat, r.lng, match.lat, match.lng) < 6)
+  })
+  cache = [...recDeduped, ...cpw]
   return cache
+}
+
+function haversineMi(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 3959
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLng = ((lng2 - lng1) * Math.PI) / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
 interface RawCpwPark { name: string; lat: number; lng: number; reserveUrl: string; slugValid: boolean }
