@@ -272,6 +272,10 @@ export default function HomePage() {
             <span className="text-[11px] text-stone-300">{STATUS_LABEL[s]}</span>
           </div>
         ))}
+        <div className="flex items-center gap-2 mt-1 pt-1.5 border-t border-stone-700/50">
+          <span className="w-3 h-3 rounded-full border border-white/40" style={{ background: '#8b5cf6' }} />
+          <span className="text-[11px] text-stone-300">CO State Park</span>
+        </div>
       </div>
 
       {/* ── Detail card ── */}
@@ -306,6 +310,7 @@ function DetailCard({ c, isSaved, onClose, onToggleSave }: {
   c: Campground; isSaved: boolean; onClose: () => void; onToggleSave: () => void
 }) {
   const status = pinStatus(c)
+  const isCpw = c.source === 'cpw'
   return (
     <div className="absolute bottom-3 left-3 z-10 w-[340px] max-w-[calc(100vw-24px)] bg-stone-900/97 backdrop-blur rounded-2xl shadow-2xl border border-stone-700/50 overflow-hidden">
       {c.photo && (
@@ -319,10 +324,10 @@ function DetailCard({ c, isSaved, onClose, onToggleSave }: {
         </div>
         <div className="mt-1.5 flex items-center gap-2 flex-wrap">
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold text-white"
-            style={{ background: STATUS_COLORS[status] }}>
-            {STATUS_LABEL[status]}{status !== 'first-come' && status !== 'unknown' ? ` · ${c.availableSites}/${c.totalSites}` : ''}
+            style={{ background: isCpw ? '#8b5cf6' : STATUS_COLORS[status] }}>
+            {isCpw ? 'CO State Park' : `${STATUS_LABEL[status]}${status !== 'first-come' && status !== 'unknown' ? ` · ${c.availableSites}/${c.totalSites}` : ''}`}
           </span>
-          {c.campgroundType && <span className="text-[11px] text-stone-400">{c.campgroundType}</span>}
+          {c.campgroundType && !isCpw && <span className="text-[11px] text-stone-400">{c.campgroundType}</span>}
         </div>
 
         {c.amenities.length > 0 && (
@@ -337,8 +342,8 @@ function DetailCard({ c, isSaved, onClose, onToggleSave }: {
 
         <div className="mt-3 flex gap-2">
           <a href={c.reserveUrl} target="_blank" rel="noopener noreferrer"
-            className="flex-1 text-center bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-lg py-2 transition-colors">
-            Go to site →
+            className={`flex-1 text-center text-white text-sm font-semibold rounded-lg py-2 transition-colors ${isCpw ? 'bg-violet-600 hover:bg-violet-500' : 'bg-green-600 hover:bg-green-500'}`}>
+            {isCpw ? 'Reserve on cpwshop →' : 'Go to site →'}
           </a>
           <a href={c.directionsUrl} target="_blank" rel="noopener noreferrer"
             title="Directions"

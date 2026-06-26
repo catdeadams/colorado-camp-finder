@@ -54,7 +54,7 @@ function campsFC(campgrounds: Campground[]): FeatureCollection {
         type: 'Feature',
         id: c.id,
         geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-        properties: { id: c.id, status: statusOf(c) },
+        properties: { id: c.id, status: statusOf(c), src: c.source },
       })),
   }
 }
@@ -108,7 +108,7 @@ export default function MapView({
       preserveDrawingBuffer: true,
     })
     mapRef.current = map
-    if (typeof window !== 'undefined') (window as unknown as { __campmap?: maplibregl.Map }).__campmap = map
+    if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') (window as unknown as { __campmap?: maplibregl.Map }).__campmap = map
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     map.addControl(new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true }, trackUserLocation: true,
@@ -129,8 +129,9 @@ export default function MapView({
             5, ['case', ['boolean', ['feature-state', 'selected'], false], 7, 4],
             10, ['case', ['boolean', ['feature-state', 'selected'], false], 11, 6.5],
             14, ['case', ['boolean', ['feature-state', 'selected'], false], 15, 9]],
-          'circle-color': ['match', ['get', 'status'],
-            'available', '#22c55e', 'limited', '#f59e0b', 'full', '#ef4444', 'first-come', '#3b82f6', '#9ca3af'],
+          'circle-color': ['case', ['==', ['get', 'src'], 'cpw'], '#8b5cf6',
+            ['match', ['get', 'status'],
+              'available', '#22c55e', 'limited', '#f59e0b', 'full', '#ef4444', 'first-come', '#3b82f6', '#9ca3af']],
           'circle-stroke-width': ['case', ['boolean', ['feature-state', 'selected'], false], 3, 1.5],
           'circle-stroke-color': ['case', ['boolean', ['feature-state', 'selected'], false], '#ffffff', '#0c0a09'],
           'circle-opacity': 0.95,
@@ -247,7 +248,7 @@ export default function MapView({
     const map = mapRef.current
     if (!map || !readyRef.current) return
     ;(map.getSource('camps') as GeoJSONSource | undefined)?.setData(campsFC(campgrounds))
-  }, [campgrounds])
+  }, [campgrounds, mapReady])
 
   // ── saved data + visibility ──
   useEffect(() => {
@@ -257,7 +258,7 @@ export default function MapView({
     if (map.getLayer('saved-circles')) {
       map.setLayoutProperty('saved-circles', 'visibility', showSaved ? 'visible' : 'none')
     }
-  }, [savedSites, showSaved])
+  }, [savedSites, showSaved, mapReady])
 
   // ── selection highlight + ease ──
   useEffect(() => {
@@ -272,7 +273,7 @@ export default function MapView({
       if (c) map.easeTo({ center: [c.lng, c.lat], zoom: Math.max(map.getZoom(), 11), duration: 600 })
     }
     prevSelected.current = selectedId
-  }, [selectedId, campgrounds])
+  }, [selectedId, campgrounds, mapReady])
 
   // ── fly to external center (search) ──
   useEffect(() => {

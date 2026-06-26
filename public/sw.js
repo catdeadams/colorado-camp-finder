@@ -11,6 +11,7 @@ const PMTILES = `pmtiles-${VERSION}`
 const PMTILES_PATH = '/co-basemap.pmtiles'
 
 const DATA_FILES = ['/data/co-campgrounds.json', '/data/co-cpw-parks.json', '/data/co-public-land.geojson', '/data/co-mvum-roads.geojson']
+const DEV = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1'
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
@@ -34,7 +35,9 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname === PMTILES_PATH) { e.respondWith(handlePmtiles(req)); return }
   if (url.pathname.startsWith('/data/')) { e.respondWith(cacheFirst(req, DATA)); return }
   if (isTerrain(url)) { e.respondWith(cacheFirst(req, TILES)); return }
-  if (isMapAsset(url) || isImmutable(url)) { e.respondWith(cacheFirst(req, SHELL)); return }
+  if (isMapAsset(url)) { e.respondWith(cacheFirst(req, SHELL)); return }
+  if (DEV) return // dev: pass app shell + chunks straight to network (avoid stale code)
+  if (isImmutable(url)) { e.respondWith(cacheFirst(req, SHELL)); return }
   if (url.origin === self.location.origin) { e.respondWith(staleWhileRevalidate(req, SHELL)); return }
 })
 
