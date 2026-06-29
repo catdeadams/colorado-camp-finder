@@ -1,0 +1,8 @@
+# The 112MB vector basemap is hosted on Cloudflare R2 (and exceeds Vercel's
+# 100MB per-file limit) — never upload it.
+public/co-basemap.pmtiles
+*.pmtiles
+
+# Build-time tooling / binaries (not needed at runtime)
+tools/
+scripts/
