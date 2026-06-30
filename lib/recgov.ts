@@ -67,7 +67,7 @@ export async function getCampgroundAvailability(
   await Promise.allSettled(
     months.map(async (monthStart) => {
       try {
-        const url = `${AVAIL_BASE}/${facilityId}/month?start_date=${monthStart.toISOString()}`
+        const url = `${AVAIL_BASE}/${facilityId}/month?start_date=${encodeURIComponent(monthStart.toISOString())}`
         const res = await fetch(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',

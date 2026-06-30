@@ -47,7 +47,7 @@ export async function checkCampgroundAvailability(
     months.map(async (monthStart) => {
       try {
         const res = await fetch(
-          `${AVAIL_BASE}/${facilityId}/month?start_date=${monthStart.toISOString()}`,
+          `${AVAIL_BASE}/${facilityId}/month?start_date=${encodeURIComponent(monthStart.toISOString())}`,
           { signal: AbortSignal.timeout(8000) },
         )
         if (!res.ok) return
@@ -102,7 +102,7 @@ export async function checkFlexibleAvailability(
     months.map(async (monthStart) => {
       try {
         const res = await fetch(
-          `${AVAIL_BASE}/${facilityId}/month?start_date=${monthStart.toISOString()}`,
+          `${AVAIL_BASE}/${facilityId}/month?start_date=${encodeURIComponent(monthStart.toISOString())}`,
           { signal: AbortSignal.timeout(8000) },
         )
         if (!res.ok) return

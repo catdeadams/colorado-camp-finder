@@ -23,7 +23,7 @@ function ensureDemSource() {
   return demSource
 }
 
-export interface MapBounds { west: number; south: number; east: number; north: number }
+export interface MapBounds { west: number; south: number; east: number; north: number; zoom: number }
 
 interface Props {
   campgrounds: Campground[]
@@ -117,7 +117,7 @@ export default function MapView({
 
     const emitBounds = () => {
       const b = map.getBounds()
-      onBoundsRef.current?.({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() })
+      onBoundsRef.current?.({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth(), zoom: map.getZoom() })
     }
 
     map.on('load', () => {

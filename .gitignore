@@ -11,6 +11,10 @@ out/
 public/*.pmtiles
 tools/
 
+# IDE + TypeScript incremental build cache
+.idea/
+tsconfig.tsbuildinfo
+
 # Capacitor Android build artifacts
 android/.gradle/
 android/app/build/

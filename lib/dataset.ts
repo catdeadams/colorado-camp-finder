@@ -25,7 +25,11 @@ export async function loadCampgrounds(): Promise<Campground[]> {
   const [recRes, cpw] = await Promise.all([fetch('/data/co-campgrounds.json'), loadCpwParks()])
   if (!recRes.ok) throw new Error('Failed to load campground dataset')
   const data = (await recRes.json()) as { campgrounds: RawCampground[] }
-  const recgov = data.campgrounds.map(toCampground)
+  // RIDB returns many non-campground "Facility" points for activity=camping
+  // (ranger districts, scenic byways, trailheads, boat launches, towns, etc.).
+  // Keep only actual campgrounds so the blue "first-come" label isn't applied to
+  // things you can't camp at. Reservable records are kept regardless of type.
+  const recgov = data.campgrounds.filter(isCampgroundRecord).map(toCampground)
   // Some CO state parks are also listed in rec.gov (often as first-come). They
   // reserve via cpwshop, so drop the rec.gov duplicate and keep the CPW entry.
   const norm = (s: string) => s.toLowerCase().replace(/\b(state park|recreation area|campground|sp|cg)\b/g, '').replace(/[^a-z0-9]/g, '')
@@ -77,6 +81,12 @@ function toCpwCampground(p: RawCpwPark): Campground {
     amenities: [],
     campgroundType: 'Colorado State Park',
   }
+}
+
+const CG_NAME = /campground|\bcg\b/i
+/** RIDB lists non-campground facilities under activity=camping; keep real campgrounds only. */
+function isCampgroundRecord(r: RawCampground): boolean {
+  return r.reservable || r.type === 'Campground' || CG_NAME.test(r.name)
 }
 
 function toCampground(r: RawCampground): Campground {

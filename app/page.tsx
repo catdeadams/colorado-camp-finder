@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import Icon from '@/components/Icon'
 import OfflineButton from '@/components/OfflineButton'
 import { loadCampgrounds } from '@/lib/dataset'
-import { checkCampgroundAvailability } from '@/lib/availabilityClient'
+import { checkCampgroundAvailability, type AvailResult } from '@/lib/availabilityClient'
 import { listSaved, saveCampground, saveCustomPin, removeSaved, exportSaved, importSaved, type SavedSite } from '@/lib/store'
 import { STATUS_COLORS } from '@/lib/basemap'
 import type { Campground, PinStatus } from '@/lib/types'
@@ -22,7 +22,10 @@ function nextWeekendDefaults() {
   const toFri = day <= 5 ? (5 - day || 7) : 6
   const fri = new Date(now); fri.setDate(now.getDate() + toFri)
   const sun = new Date(fri); sun.setDate(fri.getDate() + 2)
-  const fmt = (d: Date) => d.toISOString().split('T')[0]
+  // Format from local Y/M/D (not toISOString, which is UTC and can shift the
+  // calendar date by a day for evening visitors in Colorado's timezone).
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   return { start: fmt(fri), end: fmt(sun) }
 }
 
@@ -52,6 +55,7 @@ export default function HomePage() {
   const [bounds, setBounds] = useState<MapBounds | null>(null)
   const [dates, setDates] = useState(nextWeekendDefaults)
   const [query, setQuery] = useState('')
+  const [searchMsg, setSearchMsg] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -80,35 +84,89 @@ export default function HomePage() {
     () => campgrounds.filter((c) => c.reserveType === 'reservable' && inView(c)).slice(0, 60),
     [campgrounds, inView],
   )
+  const availableInView = useMemo(
+    () => campgrounds.filter((c) => inView(c) && (c.availability === 'available' || c.availability === 'limited')).length,
+    [campgrounds, inView],
+  )
 
   const onSearch = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!query.trim()) return
+    setSearchMsg(null)
     try {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`)
-      if (!res.ok) return
+      if (!res.ok) { setSearchMsg(`No match in Colorado for “${query.trim()}”.`); return }
       const g = await res.json()
+      if (typeof g?.lat !== 'number' || typeof g?.lng !== 'number') { setSearchMsg('No match — try a town or park name.'); return }
       setCenter({ lat: g.lat, lng: g.lng })
-    } catch { /* ignore */ }
+    } catch { setSearchMsg('Search failed — check your connection.') }
   }, [query])
 
-  const checkAvailability = useCallback(async () => {
+  // Availability cache keyed by facility + date range, so re-checks are instant.
+  const availCache = useRef(new Map<string, AvailResult>())
+  const campgroundsRef = useRef(campgrounds)
+  useEffect(() => { campgroundsRef.current = campgrounds }, [campgrounds])
+
+  const runChecks = useCallback(async (list: Campground[]) => {
     const start = new Date(`${dates.start}T00:00:00Z`)
     const end = new Date(`${dates.end}T00:00:00Z`)
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return
-    if (toCheck.length === 0) return
+    const keyOf = (id: string) => `${id}|${dates.start}|${dates.end}`
+    const pending = list.filter((c) => !availCache.current.has(keyOf(c.id)))
+    if (pending.length === 0) return
     setChecking(true)
-    setProgress({ done: 0, total: toCheck.length })
-    await runWithLimit(toCheck, 6, async (c) => {
+    setProgress({ done: 0, total: pending.length })
+
+    // Buffer results and flush in batches — applying each result individually
+    // would rebuild the entire map source once per site (janky on mobile).
+    const buffer = new Map<string, AvailResult>()
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+    const flush = () => {
+      flushTimer = null
+      if (buffer.size === 0) return
+      const updates = new Map(buffer); buffer.clear()
+      setCampgrounds((prev) => prev.map((x) => {
+        const r = updates.get(x.id)
+        return r ? { ...x, availability: r.status, availableSites: r.availableSites, totalSites: r.totalSites } : x
+      }))
+    }
+
+    await runWithLimit(pending, 6, async (c) => {
       try {
         const r = await checkCampgroundAvailability(c.id, start, end)
-        setCampgrounds((prev) => prev.map((x) => x.id === c.id
-          ? { ...x, availability: r.status, availableSites: r.availableSites, totalSites: r.totalSites } : x))
+        availCache.current.set(keyOf(c.id), r)
+        buffer.set(c.id, r)
+        if (!flushTimer) flushTimer = setTimeout(flush, 200)
       } catch { /* leave unknown */ }
       finally { setProgress((p) => ({ ...p, done: p.done + 1 })) }
     })
+    if (flushTimer) clearTimeout(flushTimer)
+    flush()
     setChecking(false)
-  }, [dates, toCheck])
+  }, [dates])
+
+  const checkAvailability = useCallback(() => runChecks(toCheck), [runChecks, toCheck])
+
+  // When the dates change, reflect any cached result (or reset to "not checked").
+  useEffect(() => {
+    setCampgrounds((prev) => prev.map((c) => {
+      if (c.reserveType !== 'reservable') return c
+      const r = availCache.current.get(`${c.id}|${dates.start}|${dates.end}`)
+      return r
+        ? { ...c, availability: r.status, availableSites: r.availableSites, totalSites: r.totalSites }
+        : { ...c, availability: 'unknown', availableSites: 0 }
+    }))
+  }, [dates.start, dates.end])
+
+  // Auto-check reservable sites in view once zoomed into an area (debounced).
+  useEffect(() => {
+    if (!bounds || bounds.zoom < 8.5) return
+    const t = setTimeout(() => {
+      const list = campgroundsRef.current.filter((c) => c.reserveType === 'reservable' && inView(c)).slice(0, 60)
+      runChecks(list)
+    }, 700)
+    return () => clearTimeout(t)
+  }, [bounds, dates.start, dates.end, inView, runChecks])
 
   const refreshSaved = useCallback(async () => setSaved(await listSaved()), [])
 
@@ -180,11 +238,12 @@ export default function HomePage() {
             <div className="relative">
               <Icon name="search" className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
-                value={query} onChange={(e) => setQuery(e.target.value)}
+                value={query} onChange={(e) => { setQuery(e.target.value); setSearchMsg(null) }}
                 placeholder="Search a town, park, or area…"
                 className="w-full bg-stone-800 text-stone-100 text-sm rounded-lg pl-9 pr-3 py-2 placeholder:text-stone-500 outline-none focus:ring-2 focus:ring-green-600/40"
               />
             </div>
+            {searchMsg && <p className="text-[11px] text-amber-300/90">{searchMsg}</p>}
             <div className="flex gap-2">
               <label className="flex-1 text-[10px] text-stone-500">
                 Check-in
@@ -197,14 +256,23 @@ export default function HomePage() {
                   className="w-full mt-0.5 bg-stone-800 text-stone-100 text-xs rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-600/40" />
               </label>
             </div>
-            <button
-              type="button" onClick={checkAvailability} disabled={checking || toCheck.length === 0}
-              className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 disabled:bg-stone-700 disabled:text-stone-500 text-white text-sm font-semibold rounded-lg py-2 transition-colors"
-            >
-              {checking
-                ? <>Checking {progress.done}/{progress.total}…</>
-                : <><Icon name="calendar" className="w-3.5 h-3.5" /> Check availability ({toCheck.length} in view)</>}
-            </button>
+            {checking ? (
+              <div className="w-full text-center text-sm font-semibold text-stone-300 bg-stone-800 rounded-lg py-2">
+                Checking availability… {progress.done}/{progress.total}
+              </div>
+            ) : bounds && bounds.zoom >= 8.5 ? (
+              <div className="w-full text-center text-xs font-semibold text-green-300 bg-green-600/10 border border-green-600/25 rounded-lg py-2">
+                ✓ Live availability for these dates{availableInView > 0 ? ` · ${availableInView} open here` : ''}
+              </div>
+            ) : (
+              <button
+                type="button" onClick={checkAvailability} disabled={toCheck.length === 0}
+                title="Or zoom into an area to load availability automatically"
+                className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 disabled:bg-stone-700 disabled:text-stone-500 text-white text-sm font-semibold rounded-lg py-2 transition-colors"
+              >
+                <Icon name="calendar" className="w-3.5 h-3.5" /> Check availability ({toCheck.length} in view)
+              </button>
+            )}
           </form>
           <div className="px-3 pb-3">
             <button
@@ -264,7 +332,7 @@ export default function HomePage() {
       </button>
 
       {/* ── Legend ── */}
-      <div className="hidden sm:block absolute bottom-8 right-3 z-10 bg-stone-900/90 backdrop-blur rounded-xl border border-stone-700/50 p-3 shadow-xl">
+      <div className={`${selected ? 'hidden sm:block' : 'block'} absolute bottom-8 right-3 z-10 bg-stone-900/90 backdrop-blur rounded-xl border border-stone-700/50 p-2.5 sm:p-3 shadow-xl`}>
         <div className="text-[10px] font-bold text-stone-500 uppercase tracking-widest mb-1.5">Availability</div>
         {(['available', 'limited', 'full', 'first-come', 'unknown'] as PinStatus[]).map((s) => (
           <div key={s} className="flex items-center gap-2 mb-1 last:mb-0">
