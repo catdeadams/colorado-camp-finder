@@ -13,6 +13,7 @@
     "@capacitor/cli": "^6.2.1",
     "@capacitor/core": "^6.2.1",
     "@protomaps/basemaps": "^5.7.2",
+    "@upstash/redis": "^1.38.0",
     "clsx": "^2.1.1",
     "dexie": "^4.4.4",
     "maplibre-contour": "^0.1.0",

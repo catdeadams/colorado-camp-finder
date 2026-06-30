@@ -130,7 +130,7 @@ export default function WatchModal({ campground, startDate, endDate, onClose, on
                 </button>
 
                 <p className="text-stone-600 text-[10px] text-center">
-                  Alerts check every 15 min when the app is running
+                  We keep checking and email you the moment a site opens
                 </p>
               </form>
             </>

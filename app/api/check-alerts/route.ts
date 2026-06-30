@@ -5,11 +5,19 @@ import { sendAvailabilityAlert } from '@/lib/email'
 
 const CHECK_INTERVAL_MINUTES = 15
 
-export async function POST() {
+export async function POST(request: Request) {
+  // Only the scheduler (GitHub Action) may trigger checks. Set CRON_SECRET in
+  // both Vercel env and the GitHub Action secret; if unset, the gate is open
+  // (useful for local testing).
+  const secret = process.env.CRON_SECRET
+  if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const now = new Date()
   const cutoff = new Date(now.getTime() - CHECK_INTERVAL_MINUTES * 60 * 1000)
 
-  const pending = readWatches().filter((w) => {
+  const pending = (await readWatches()).filter((w) => {
     if (!w.isActive) return false
     if (w.notifiedAt) return false  // already fired, stop checking
     if (w.lastCheckedAt && new Date(w.lastCheckedAt) > cutoff) return false
@@ -27,7 +35,7 @@ export async function POST() {
 
       // Only rec.gov watches support programmatic availability checks right now
       if (watch.campgroundSource !== 'recgov') {
-        updateWatchCheck(watch.id, 'skipped', false)
+        await updateWatchCheck(watch.id, 'skipped', false)
         checked++
         continue
       }
@@ -54,7 +62,7 @@ export async function POST() {
         }
       }
 
-      updateWatchCheck(watch.id, avail.status, didNotify)
+      await updateWatchCheck(watch.id, avail.status, didNotify)
       checked++
     } catch (err) {
       errors.push(`Check failed for ${watch.id}: ${err instanceof Error ? err.message : err}`)

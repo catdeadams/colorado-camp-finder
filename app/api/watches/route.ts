@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server'
-import { readWatches, addWatch, removeWatch } from '@/lib/db'
+import { addWatch, removeWatch } from '@/lib/db'
 
-export async function GET() {
-  const watches = readWatches().filter((w) => w.isActive)
-  return NextResponse.json({ watches })
-}
+// No GET handler: listing watches would expose every watcher's email address,
+// and there are no accounts to scope it to. Watches are write/delete only.
 
 export async function POST(request: Request) {
   const body = await request.json()
@@ -18,7 +16,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
   }
 
-  const watch = addWatch({
+  const watch = await addWatch({
     campgroundId,
     campgroundName,
     campgroundSource: campgroundSource || 'recgov',
@@ -37,6 +35,6 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
-  removeWatch(id)
+  await removeWatch(id)
   return NextResponse.json({ ok: true })
 }

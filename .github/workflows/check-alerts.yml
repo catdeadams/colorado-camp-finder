@@ -1,0 +1,36 @@
+name: Check campsite alerts
+
+# Hobby-plan Vercel Cron only runs ~once/day, which is too slow for campsite
+# cancellations. This Action pings the deployed /api/check-alerts endpoint
+# instead. rec.gov answers Vercel's network fine (verified), so the heavy
+# lifting still runs on Vercel — this is just the scheduler.
+#
+# Setup: add a repository secret CRON_SECRET (any long random string) that
+# matches the CRON_SECRET env var in Vercel.
+
+on:
+  schedule:
+    # Every 20 minutes. GitHub may delay scheduled runs during peak load.
+    - cron: '*/20 * * * *'
+  workflow_dispatch: {}
+
+# Don't pile up runs if one is slow.
+concurrency:
+  group: check-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger availability check
+        env:
+          APP_URL: https://colorado-camping-finder.vercel.app
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS --max-time 60 -o /tmp/out.txt -w "%{http_code}" \
+            -X POST "${APP_URL}/api/check-alerts" \
+            -H "Authorization: Bearer ${CRON_SECRET}")
+          echo "HTTP ${code}"
+          cat /tmp/out.txt; echo
+          test "${code}" = "200"

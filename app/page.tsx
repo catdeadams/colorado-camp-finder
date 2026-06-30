@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import Icon from '@/components/Icon'
 import OfflineButton from '@/components/OfflineButton'
+import WatchModal from '@/components/WatchModal'
 import { loadCampgrounds } from '@/lib/dataset'
 import { checkCampgroundAvailability, type AvailResult } from '@/lib/availabilityClient'
 import { listSaved, saveCampground, saveCustomPin, removeSaved, exportSaved, importSaved, type SavedSite } from '@/lib/store'
@@ -64,6 +65,7 @@ export default function HomePage() {
   const [panelOpen, setPanelOpen] = useState(false)
   const [dropMode, setDropMode] = useState(false)
   const [pinDraft, setPinDraft] = useState<{ lat: number; lng: number } | null>(null)
+  const [watchFor, setWatchFor] = useState<Campground | null>(null)
   const [layersOpen, setLayersOpen] = useState(false)
   const [showPublicLand, setShowPublicLand] = useState(false)
   const [showRoads, setShowRoads] = useState(false)
@@ -353,6 +355,7 @@ export default function HomePage() {
           isSaved={savedIds.has(selected.id)}
           onClose={() => setSelectedId(null)}
           onToggleSave={() => toggleSave(selected)}
+          onWatch={() => setWatchFor(selected)}
         />
       )}
 
@@ -370,12 +373,22 @@ export default function HomePage() {
       )}
 
       {pinDraft && <PinModal onCancel={() => setPinDraft(null)} onSave={savePin} />}
+
+      {watchFor && (
+        <WatchModal
+          campground={watchFor}
+          startDate={dates.start}
+          endDate={dates.end}
+          onClose={() => setWatchFor(null)}
+          onSaved={() => { /* modal shows its own success state */ }}
+        />
+      )}
     </div>
   )
 }
 
-function DetailCard({ c, isSaved, onClose, onToggleSave }: {
-  c: Campground; isSaved: boolean; onClose: () => void; onToggleSave: () => void
+function DetailCard({ c, isSaved, onClose, onToggleSave, onWatch }: {
+  c: Campground; isSaved: boolean; onClose: () => void; onToggleSave: () => void; onWatch: () => void
 }) {
   const status = pinStatus(c)
   const isCpw = c.source === 'cpw'
@@ -425,6 +438,13 @@ function DetailCard({ c, isSaved, onClose, onToggleSave }: {
             <Icon name={isSaved ? 'bookmarkFilled' : 'bookmark'} className="w-4 h-4" />
           </button>
         </div>
+
+        {c.source === 'recgov' && c.reserveType === 'reservable' && (
+          <button onClick={onWatch}
+            className="mt-2 w-full flex items-center justify-center gap-2 bg-stone-800 hover:bg-stone-700 text-green-300 text-sm font-semibold rounded-lg py-2 transition-colors border border-stone-700/80">
+            <Icon name="bell" className="w-3.5 h-3.5" /> Alert me when a site opens
+          </button>
+        )}
       </div>
     </div>
   )

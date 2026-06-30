@@ -1,10 +1,19 @@
-import fs from 'fs'
-import path from 'path'
+import { Redis } from '@upstash/redis'
 
-const DATA_DIR = process.env.VERCEL
-  ? '/tmp/camping-data'
-  : path.join(process.cwd(), 'data')
-const WATCHES_FILE = path.join(DATA_DIR, 'watches.json')
+// Durable watch store backed by Upstash Redis (REST — works in Vercel
+// serverless). Watches live in a single hash keyed by watch id, so the
+// scheduler and the API both see the same data across invocations.
+// Requires UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN.
+
+const KEY = 'watches'
+
+let client: Redis | null = null
+// Lazy so importing this module (e.g. during `next build`) doesn't throw when
+// the env vars aren't present; the credentials are only needed at call time.
+function redis(): Redis {
+  if (!client) client = Redis.fromEnv()
+  return client
+}
 
 export interface Watch {
   id: string
@@ -24,29 +33,14 @@ export interface Watch {
   isActive: boolean
 }
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
+export async function readWatches(): Promise<Watch[]> {
+  const all = await redis().hgetall<Record<string, Watch>>(KEY)
+  return all ? Object.values(all) : []
 }
 
-export function readWatches(): Watch[] {
-  ensureDir()
-  if (!fs.existsSync(WATCHES_FILE)) return []
-  try {
-    return JSON.parse(fs.readFileSync(WATCHES_FILE, 'utf-8'))
-  } catch {
-    return []
-  }
-}
-
-function saveWatches(watches: Watch[]): void {
-  ensureDir()
-  fs.writeFileSync(WATCHES_FILE, JSON.stringify(watches, null, 2), 'utf-8')
-}
-
-export function addWatch(
+export async function addWatch(
   input: Omit<Watch, 'id' | 'createdAt' | 'lastCheckedAt' | 'lastStatus' | 'notifiedAt' | 'isActive'>
-): Watch {
-  const watches = readWatches()
+): Promise<Watch> {
   const watch: Watch = {
     ...input,
     id: crypto.randomUUID(),
@@ -56,28 +50,20 @@ export function addWatch(
     notifiedAt: null,
     isActive: true,
   }
-  watches.push(watch)
-  saveWatches(watches)
+  await redis().hset(KEY, { [watch.id]: watch })
   return watch
 }
 
-export function removeWatch(id: string): void {
-  const watches = readWatches()
-  saveWatches(watches.map((w) => (w.id === id ? { ...w, isActive: false } : w)))
+export async function removeWatch(id: string): Promise<void> {
+  await redis().hdel(KEY, id)
 }
 
-export function updateWatchCheck(id: string, status: string, didNotify: boolean): void {
-  const watches = readWatches()
-  saveWatches(
-    watches.map((w) =>
-      w.id !== id
-        ? w
-        : {
-            ...w,
-            lastCheckedAt: new Date().toISOString(),
-            lastStatus: status,
-            notifiedAt: didNotify ? new Date().toISOString() : w.notifiedAt,
-          }
-    )
-  )
+export async function updateWatchCheck(id: string, status: string, didNotify: boolean): Promise<void> {
+  const all = await redis().hgetall<Record<string, Watch>>(KEY)
+  const watch = all?.[id]
+  if (!watch) return
+  watch.lastCheckedAt = new Date().toISOString()
+  watch.lastStatus = status
+  if (didNotify) watch.notifiedAt = new Date().toISOString()
+  await redis().hset(KEY, { [id]: watch })
 }
