@@ -158,6 +158,31 @@ export default function MapView({
 
       const labelLayerId = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
 
+      // ── orientation aids: the plain "light" style draws no state outline and
+      // very thin highways, so zoomed-out (and offline) views are hard to place.
+      // Re-draw both from the Protomaps vector data already in the offline pack. ──
+      map.addLayer({
+        id: 'orient-highways', type: 'line', source: 'protomaps', 'source-layer': 'roads',
+        filter: ['==', ['get', 'kind'], 'highway'], maxzoom: 11,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#b45309',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1, 8, 2.4, 11, 3.5],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.85, 9, 0.85, 10.5, 0.5, 11, 0],
+        },
+      }, labelLayerId)
+      map.addLayer({
+        id: 'orient-state-borders', type: 'line', source: 'protomaps', 'source-layer': 'boundaries',
+        filter: ['==', ['get', 'kind'], 'region'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#44403c',
+          'line-dasharray': [2, 1.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.3, 8, 2.4, 12, 3.2],
+          'line-opacity': 0.9,
+        },
+      }, labelLayerId)
+
       // ── dispersed-intel layers (below pins/labels; hidden until toggled) ──
       map.addSource('dem', {
         type: 'raster-dem',
