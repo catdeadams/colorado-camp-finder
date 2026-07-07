@@ -15,20 +15,38 @@ body {
 
 /* Make the date-input calendar icon clearly visible on the dark fields. */
 input[type='date']::-webkit-calendar-picker-indicator {
-  filter: invert(0.85);
-  opacity: 0.65;
+  filter: invert(1);
+  opacity: 0.9;
   cursor: pointer;
+  transform: scale(1.25);
+  margin-left: 4px;
 }
 input[type='date']::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
 }
 
-/* MapLibre popup overrides */
+/* MapLibre popup overrides — dark theme to match the app (forest-road info). */
 .maplibregl-popup-content {
-  border-radius: 10px !important;
-  padding: 14px !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35) !important;
+  border-radius: 12px !important;
+  padding: 12px 14px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45) !important;
   font-family: system-ui, sans-serif;
+  background: #1c1917 !important;
+  color: #e7e5e4 !important;
+  border: 1px solid rgba(120, 113, 108, 0.35);
+}
+
+.maplibregl-popup-close-button {
+  color: #a8a29e !important;
+  font-size: 18px !important;
+  width: 22px;
+  height: 22px;
+  right: 2px !important;
+  top: 2px !important;
+}
+.maplibregl-popup-close-button:hover {
+  background: transparent !important;
+  color: #fff !important;
 }
 
 .maplibregl-popup-tip {

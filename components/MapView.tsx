@@ -38,6 +38,7 @@ interface Props {
   showPublicLand?: boolean
   showRoads?: boolean
   showHillshade?: boolean
+  basemap?: 'terrain' | 'streets'
 }
 
 function statusOf(c: Campground): PinStatus {
@@ -73,10 +74,14 @@ function savedFC(sites: SavedSite[]): FeatureCollection {
   }
 }
 
+const FLAT_COLOR: Record<string, string> = { flat: '#16a34a', gentle: '#84cc16', moderate: '#f59e0b', steep: '#dc2626' }
+const titleCase = (s: string) => s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+
 export default function MapView({
   campgrounds, selectedId, onSelect, center, savedSites = [], showSaved = true, onBoundsChange,
   dropMode = false, onMapPoint,
-  showPublicLand = false, showRoads = false, showHillshade = false,
+  showPublicLand = false, showRoads = false, showHillshade = false, basemap = 'terrain',
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -183,13 +188,22 @@ export default function MapView({
         },
       }, labelLayerId)
       map.addSource('mvum', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      // Dark casing beneath the colored roads so they stay legible on any basemap.
       map.addLayer({
-        id: 'mvum-roads', type: 'line', source: 'mvum', minzoom: 8, layout: { visibility: 'none', 'line-cap': 'round' },
+        id: 'mvum-casing', type: 'line', source: 'mvum', minzoom: 8, layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#0c0a09',
+          'line-opacity': 0.55,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 2.6, 11, 5, 14, 8],
+        },
+      }, labelLayerId)
+      map.addLayer({
+        id: 'mvum-roads', type: 'line', source: 'mvum', minzoom: 8, layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': ['match', ['get', 'flat'],
             'flat', '#16a34a', 'gentle', '#84cc16', 'moderate', '#f59e0b', 'steep', '#dc2626', '#9ca3af'],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 13, 2.2],
-          'line-opacity': 0.8,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.4, 11, 3, 14, 5],
+          'line-opacity': 0.95,
         },
       }, labelLayerId)
 
@@ -224,12 +238,33 @@ export default function MapView({
       })
       map.on('click', 'mvum-roads', (e) => {
         const p = (e.features?.[0]?.properties || {}) as Record<string, unknown>
-        const access = p.car === 'open' ? 'Cars OK' : p.hc === 'open' ? 'High-clearance' : p.fourwd === 'open' ? '4WD only' : 'Restricted'
+        const name = p.name ? titleCase(String(p.name)) : 'Unnamed forest road'
+        const access = p.car === 'open' ? { label: 'Cars OK', color: '#22c55e' }
+          : p.hc === 'open' ? { label: 'High-clearance', color: '#f59e0b' }
+          : p.fourwd === 'open' ? { label: '4WD only', color: '#f97316' }
+          : { label: 'Restricted', color: '#ef4444' }
+        const flat = p.flat && p.flat !== 'unknown' ? String(p.flat) : null
         const surface = String(p.surface || '').replace(/^[A-Z]+ - /, '')
-        new maplibregl.Popup({ offset: 6, closeButton: true, maxWidth: '230px' })
-          .setLngLat(e.lngLat)
-          .setHTML(`<div style="font-family:system-ui,sans-serif;font-size:12px;min-width:150px"><b>${p.name || 'Forest road'}</b><br>${access} · ${p.flat || '?'} terrain${p.slope != null ? ` (${p.slope}°)` : ''}<br><span style="color:#78716c;font-size:11px">${surface}${p.forest ? ' · ' + p.forest : ''}</span></div>`)
-          .addTo(map)
+        const maint = String(p.maint || '').replace(/^\d+ - /, '')
+        const season = p.seasonal === 'seasonal' ? 'Seasonal (may close)' : p.seasonal === 'yearlong' ? 'Year-round' : null
+        const row = (label: string, value: string, color = '#e7e5e4') =>
+          `<div style="display:flex;justify-content:space-between;gap:14px;margin-top:5px"><span style="color:#a8a29e">${label}</span><span style="color:${color};font-weight:600;text-align:right">${value}</span></div>`
+        const rows = [row('Access', access.label, access.color)]
+        if (p.slope != null || flat) {
+          const grade = `${p.slope != null ? `${p.slope}°` : ''}${p.slope != null && flat ? ' · ' : ''}${flat ? titleCase(flat) : ''}`
+          rows.push(row('Grade', grade, flat ? FLAT_COLOR[flat] || '#e7e5e4' : '#e7e5e4'))
+        }
+        if (surface) rows.push(row('Surface', esc(titleCase(surface))))
+        if (maint) rows.push(row('Suited for', esc(titleCase(maint))))
+        if (season) rows.push(row('Season', season))
+        const html = `<div style="font-family:system-ui,sans-serif;font-size:12px;min-width:196px">`
+          + `<div style="font-weight:700;font-size:13px;color:#fff;padding-right:16px;line-height:1.25">${esc(name)}</div>`
+          + rows.join('')
+          + (p.forest ? `<div style="margin-top:8px;padding-top:7px;border-top:1px solid #44403c;color:#78716c;font-size:11px;line-height:1.3">${esc(p.forest)}</div>` : '')
+          + `<div style="margin-top:6px;color:#57534e;font-size:10px;line-height:1.3">Verify access, legality &amp; closures on-site.</div>`
+          + `</div>`
+        new maplibregl.Popup({ offset: 8, closeButton: true, maxWidth: '250px' })
+          .setLngLat(e.lngLat).setHTML(html).addTo(map)
       })
       map.on('mouseenter', 'mvum-roads', () => { map.getCanvas().style.cursor = 'pointer' })
       map.on('mouseleave', 'mvum-roads', () => { map.getCanvas().style.cursor = '' })
@@ -299,7 +334,10 @@ export default function MapView({
     setVis('hillshade', showHillshade)
     setVis('publicland-fill', showPublicLand)
     setVis('publicland-outline', showPublicLand)
+    setVis('mvum-casing', showRoads)
     setVis('mvum-roads', showRoads)
+    // Streets mode hides the green landcover fills so roads + labels read clearly.
+    for (const id of ['landcover', 'landuse_park', 'landuse_urban_green']) setVis(id, basemap === 'terrain')
 
     if (showPublicLand && !dataLoadedRef.current.publicLand) {
       dataLoadedRef.current.publicLand = true
@@ -313,7 +351,7 @@ export default function MapView({
         .then((d) => { (map.getSource('mvum') as GeoJSONSource | undefined)?.setData(d) })
         .catch(() => { dataLoadedRef.current.roads = false })
     }
-  }, [showPublicLand, showRoads, showHillshade, mapReady])
+  }, [showPublicLand, showRoads, showHillshade, basemap, mapReady])
 
   return <div ref={containerRef} className="h-full w-full" />
 }

@@ -70,6 +70,7 @@ export default function HomePage() {
   const [showPublicLand, setShowPublicLand] = useState(false)
   const [showRoads, setShowRoads] = useState(false)
   const [showHillshade, setShowHillshade] = useState(true)
+  const [basemap, setBasemap] = useState<'terrain' | 'streets'>('terrain')
 
   useEffect(() => {
     loadCampgrounds().then(setCampgrounds).catch((e) => setLoadError(e.message))
@@ -215,6 +216,7 @@ export default function HomePage() {
         showPublicLand={showPublicLand}
         showRoads={showRoads}
         showHillshade={showHillshade}
+        basemap={basemap}
       />
 
       {dropMode && (
@@ -247,15 +249,19 @@ export default function HomePage() {
             </div>
             {searchMsg && <p className="text-[11px] text-amber-300/90">{searchMsg}</p>}
             <div className="flex gap-2">
-              <label className="flex-1 text-[10px] text-stone-500">
+              <label className="flex-1 text-[10px] font-medium text-stone-400">
                 Check-in
-                <input type="date" value={dates.start} onChange={(e) => setDates((d) => ({ ...d, start: e.target.value }))}
-                  className="w-full mt-0.5 bg-stone-800 text-stone-100 text-xs rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-600/40" />
+                <input type="date" value={dates.start} max={dates.end}
+                  onChange={(e) => setDates((d) => ({ ...d, start: e.target.value }))}
+                  onClick={(e) => { try { e.currentTarget.showPicker?.() } catch { /* not supported */ } }}
+                  className="w-full mt-1 bg-stone-700 hover:bg-stone-600 text-stone-50 text-sm font-medium rounded-lg px-2.5 py-2 border border-stone-600 cursor-pointer outline-none focus:ring-2 focus:ring-green-500/50 transition-colors" />
               </label>
-              <label className="flex-1 text-[10px] text-stone-500">
+              <label className="flex-1 text-[10px] font-medium text-stone-400">
                 Check-out
-                <input type="date" value={dates.end} onChange={(e) => setDates((d) => ({ ...d, end: e.target.value }))}
-                  className="w-full mt-0.5 bg-stone-800 text-stone-100 text-xs rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-600/40" />
+                <input type="date" value={dates.end} min={dates.start}
+                  onChange={(e) => setDates((d) => ({ ...d, end: e.target.value }))}
+                  onClick={(e) => { try { e.currentTarget.showPicker?.() } catch { /* not supported */ } }}
+                  className="w-full mt-1 bg-stone-700 hover:bg-stone-600 text-stone-50 text-sm font-medium rounded-lg px-2.5 py-2 border border-stone-600 cursor-pointer outline-none focus:ring-2 focus:ring-green-500/50 transition-colors" />
               </label>
             </div>
             {checking ? (
@@ -298,6 +304,16 @@ export default function HomePage() {
           </button>
           {layersOpen && (
             <div className="px-4 pb-3">
+              {/* Base-map style: Terrain (topo + green landcover) vs Streets (clean road map) */}
+              <div className="flex items-center gap-2 pb-2.5 mb-2 border-b border-stone-700/50">
+                <span className="text-[11px] text-stone-300 flex-1">Base map</span>
+                <div className="flex bg-stone-800 rounded-lg p-0.5">
+                  <button type="button" onClick={() => setBasemap('terrain')}
+                    className={`text-[11px] font-semibold rounded-md px-2.5 py-1 transition-colors ${basemap === 'terrain' ? 'bg-stone-600 text-white' : 'text-stone-400 hover:text-stone-200'}`}>Terrain</button>
+                  <button type="button" onClick={() => setBasemap('streets')}
+                    className={`text-[11px] font-semibold rounded-md px-2.5 py-1 transition-colors ${basemap === 'streets' ? 'bg-stone-600 text-white' : 'text-stone-400 hover:text-stone-200'}`}>Streets</button>
+                </div>
+              </div>
               <LayerToggle label="Public land" color="#15803d" checked={showPublicLand} onChange={() => setShowPublicLand((v) => !v)} />
               <LayerToggle label="Forest roads (MVUM)" color="#16a34a" checked={showRoads} onChange={() => setShowRoads((v) => !v)} />
               <LayerToggle label="Hillshade (terrain)" color="#a8a29e" checked={showHillshade} onChange={() => setShowHillshade((v) => !v)} />
